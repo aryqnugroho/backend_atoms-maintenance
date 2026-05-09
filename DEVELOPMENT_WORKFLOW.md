@@ -43,7 +43,7 @@ This document defines the phased development workflow for the ATOMS-Maintenance 
 - [ ] Create Form Request classes for validation
 - [ ] Create `WorkOrderPolicy` for authorization
 - [ ] Seed sample work orders
-- [ ] Verify: Frontend Work Order page works against real API
+- [ ] Verify: Frontend Work Order page works against real API (Note: Frontend expects `completed`, `on_hold`, `ongoing` statuses)
 
 ### Phase 4: CNSD Inspections 🏗️ (Prep)
 - [x] Create `cnsd_categories` migration + model + seeder (skeleton)
@@ -180,9 +180,11 @@ docs(api): update API_PLAN with new endpoints
 - API endpoint tests with mock auth
 - Full request → response cycle
 
-### Manual Verification
+### Manual Verification & Integration Testing
 - Frontend ↔ Backend integration test for each module
 - Role-based access control verification
+- **CORS Troubleshooting:** Ensure `config/cors.php` includes the frontend URL (`localhost:5173`) in `allowed_origins` and sets `supports_credentials = true`.
+- **Mock Auth Integration:** When `DEV_MOCK_AUTH=true`, verify frontend login returns a valid mock token and `/auth/me` retrieves the correct mocked user profile.
 
 ---
 

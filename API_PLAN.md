@@ -37,6 +37,11 @@
 | `POST` | `/api/v1/auth/logout` | Logout / revoke token | Bearer | Clears session |
 | `GET` | `/api/v1/auth/me` | Get current user profile | Bearer | Returns mock user |
 
+**Integration Status:**
+- `POST /api/v1/auth/login` and `GET /api/v1/auth/me` are successfully integrated with `frontend_atoms-maintenance`.
+- The frontend correctly receives the mock token and populates the local session.
+- **Note:** Work Order UI has been updated to use standardized statuses (`completed`, `on_hold`, `ongoing`). The backend Work Order API must adapt to these statuses when implemented.
+
 ### Role Middleware
 
 | Role | Access Level |

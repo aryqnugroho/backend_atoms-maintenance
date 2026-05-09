@@ -19,8 +19,8 @@ class AuthController extends Controller
     public function login(Request $request)
     {
         if (env('DEV_MOCK_AUTH', false)) {
-            $userId = $request->input('user_id');
-            $user = LocalUser::where('rostering_user_id', $userId)->first();
+            $email = $request->input('email');
+            $user = LocalUser::where('email', $email)->first();
 
             if (!$user) {
                 return $this->error('Mock user not found.', null, 404);
