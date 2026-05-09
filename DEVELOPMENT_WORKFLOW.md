@@ -34,16 +34,16 @@ This document defines the phased development workflow for the ATOMS-Maintenance 
 - [x] Create `AuthController` with mock logic
 - [x] Verify: Frontend can authenticate with mock token and access protected routes
 
-### Phase 3: Work Orders ✅ (Scaffolded)
+### Phase 3: Work Orders ✅ (Complete)
 - [x] Create `work_orders` migration + model
 - [x] Create `work_order_personnel` migration + model
 - [x] Create `work_order_outputs` migration + model
-- [ ] Create `WorkOrderService` with state machine logic
+- [x] Create `WorkOrderService` with state machine logic
 - [x] Create `WorkOrderController` (CRUD + status transitions skeleton)
-- [ ] Create Form Request classes for validation
-- [ ] Create `WorkOrderPolicy` for authorization
-- [ ] Seed sample work orders
-- [ ] Verify: Frontend Work Order page works against real API (Note: Frontend expects `completed`, `on_hold`, `ongoing` statuses)
+- [x] Create Form Request classes for validation
+- [x] Create `WorkOrderPolicy` for authorization
+- [x] Seed sample work orders
+- [x] Verify: Frontend Work Order page works against real API (Note: Frontend expects `completed`, `on_hold`, `ongoing` statuses)
 
 ### Phase 4: CNSD Inspections 🏗️ (Prep)
 - [x] Create `cnsd_categories` migration + model + seeder (skeleton)

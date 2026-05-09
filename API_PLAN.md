@@ -40,7 +40,7 @@
 **Integration Status:**
 - `POST /api/v1/auth/login` and `GET /api/v1/auth/me` are successfully integrated with `frontend_atoms-maintenance`.
 - The frontend correctly receives the mock token and populates the local session.
-- **Note:** Work Order UI has been updated to use standardized statuses (`completed`, `on_hold`, `ongoing`). The backend Work Order API must adapt to these statuses when implemented.
+- **Note:** Work Order UI and Backend have been updated to use standardized statuses (`completed`, `on_hold`, `ongoing`). The Work Order API is now fully integrated.
 
 ### Role Middleware
 
@@ -82,14 +82,14 @@
 ### Work Order Status State Machine
 
 ```
-open ──► in_progress ──► pending ──► closed
-                            │
-                            └──► (can reopen to in_progress)
+ongoing ──► on_hold
+   │           │
+   └──► completed ◄──┘
 ```
 
 ### Query Params for `GET /work-orders`
 - `division` — `CNSD` or `TFP`
-- `status` — `open`, `in_progress`, `pending`, `closed`
+- `status` — `ongoing`, `on_hold`, `completed`
 - `wo_type` — `shift` or `personal`
 - `shift_date` — ISO date
 - `shift_type` — `pagi`, `siang`, `malam`

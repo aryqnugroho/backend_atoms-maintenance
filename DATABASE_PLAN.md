@@ -79,7 +79,7 @@
 | shift_type | VARCHAR(10) | `pagi`, `siang`, `malam` |
 | shift_date | DATE | |
 | description | TEXT | |
-| status | VARCHAR(20) | `open` → `in_progress` → `pending` → `closed` |
+| status | VARCHAR(20) | `ongoing` → `on_hold` → `completed` |
 | manager_id | INTEGER FK → local_users | |
 | supervisor_id | INTEGER FK → local_users | |
 | assigned_technician_id | INTEGER FK → local_users NULL | For `personal` WO only |

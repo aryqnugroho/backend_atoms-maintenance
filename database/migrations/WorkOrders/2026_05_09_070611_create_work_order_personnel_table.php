@@ -15,7 +15,7 @@ return new class extends Migration
             $table->id();
             $table->unsignedBigInteger('work_order_id');
             $table->unsignedBigInteger('user_id');
-            $table->string('role', 50); // e.g., 'Ketua', 'Anggota'
+            $table->string('role_label', 50); // e.g., 'Teknisi 1', 'Teknisi 2'
             
             $table->foreign('work_order_id')->references('id')->on('work_orders')->onDelete('cascade');
             $table->foreign('user_id')->references('id')->on('local_users');
