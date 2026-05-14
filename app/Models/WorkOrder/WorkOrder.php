@@ -3,6 +3,8 @@
 namespace App\Models\WorkOrder;
 
 use App\Models\LocalUser;
+use App\Traits\HasSignature;
+use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -10,7 +12,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class WorkOrder extends Model
 {
-    use SoftDeletes;
+    use HasSignature, SoftDeletes;
 
     protected $table = 'work_orders';
 
@@ -20,13 +22,27 @@ class WorkOrder extends Model
         'division',
         'shift_type',
         'shift_date',
+        'shift_id',
         'description',
         'status',
         'manager_id',
         'supervisor_id',
         'assigned_technician_id',
+        'has_supervisor',
         'manager_name_snapshot',
         'supervisor_name_snapshot',
+        'mt_name',
+        'mt_signature',
+        'mt_signed_by',
+        'mt_signed_at',
+        'supervisor_name',
+        'supervisor_signature',
+        'supervisor_signed_by',
+        'supervisor_signed_at',
+        'technician_name',
+        'technician_signature',
+        'technician_signed_by',
+        'technician_signed_at',
         'start_time',
         'end_time',
         'completion_status',
@@ -39,6 +55,10 @@ class WorkOrder extends Model
 
     protected $casts = [
         'shift_date' => 'date:Y-m-d',
+        'has_supervisor' => 'boolean',
+        'mt_signed_at' => 'datetime',
+        'supervisor_signed_at' => 'datetime',
+        'technician_signed_at' => 'datetime',
         'closed_at' => 'datetime',
     ];
 
@@ -84,6 +104,21 @@ class WorkOrder extends Model
         return $this->belongsTo(LocalUser::class, 'assigned_technician_id');
     }
 
+    public function mtSigner(): BelongsTo
+    {
+        return $this->belongsTo(LocalUser::class, 'mt_signed_by');
+    }
+
+    public function supervisorSigner(): BelongsTo
+    {
+        return $this->belongsTo(LocalUser::class, 'supervisor_signed_by');
+    }
+
+    public function technicianSigner(): BelongsTo
+    {
+        return $this->belongsTo(LocalUser::class, 'technician_signed_by');
+    }
+
     public function creator(): BelongsTo
     {
         return $this->belongsTo(LocalUser::class, 'created_by');
@@ -97,6 +132,53 @@ class WorkOrder extends Model
     public function outputs(): HasMany
     {
         return $this->hasMany(WorkOrderOutput::class, 'work_order_id');
+    }
+
+    public function requiredSignatureRoles(): array
+    {
+        return $this->has_supervisor
+            ? ['mt', 'supervisor', 'technician']
+            : ['mt', 'technician'];
+    }
+
+    public function isShiftEnded(): bool
+    {
+        if (!$this->shift_date || !$this->shift_type) {
+            return false;
+        }
+
+        // Use RosteringIntegrationService for real shift times when available.
+        // Falls back to hardcoded times if rostering DB is unavailable.
+        try {
+            /** @var \App\Services\RosteringIntegrationService $service */
+            $service = app(\App\Services\RosteringIntegrationService::class);
+            return $service->isShiftEnded(
+                $this->shift_type,
+                $this->shift_date->format('Y-m-d')
+            );
+        } catch (\Exception $e) {
+            // Fallback: hardcoded shift end times
+            $shiftEnds = [
+                'pagi'  => '13:00',
+                'siang' => '19:00',
+                'malam' => '07:00',
+            ];
+
+            if (!isset($shiftEnds[$this->shift_type])) {
+                return false;
+            }
+
+            $endDate = $this->shift_date->copy();
+            if ($this->shift_type === 'malam') {
+                $endDate = $endDate->addDay();
+            }
+
+            $shiftEnd = \Carbon\Carbon::parse(
+                $endDate->format('Y-m-d') . ' ' . $shiftEnds[$this->shift_type]
+            );
+
+            return now()->greaterThanOrEqualTo($shiftEnd);
+        }
     }
 
     // ─── Scopes ────────────────────────────────────────────────

@@ -6,8 +6,10 @@ use App\Models\LocalUser;
 use App\Models\WorkOrder\WorkOrder;
 use App\Models\WorkOrder\WorkOrderOutput;
 use App\Models\WorkOrder\WorkOrderPersonnel;
+use InvalidArgumentException;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\DB;
+use RuntimeException;
 
 class WorkOrderService
 {
@@ -54,8 +56,9 @@ class WorkOrderService
         if (!empty($filters['search'])) {
             $search = $filters['search'];
             $query->where(function ($q) use ($search) {
-                $q->where('wo_number', 'ILIKE', "%{$search}%")
-                  ->orWhere('description', 'ILIKE', "%{$search}%");
+                $searchPattern = '%' . $search . '%';
+                $q->where('wo_number', 'ILIKE', $searchPattern)
+                  ->orWhere('description', 'ILIKE', $searchPattern);
             });
         }
 
@@ -82,6 +85,9 @@ class WorkOrderService
             'supervisor:id,name',
             'assignedTechnician:id,name',
             'creator:id,name',
+            'mtSigner:id,name',
+            'supervisorSigner:id,name',
+            'technicianSigner:id,name',
         ])->find($id);
     }
 
@@ -91,12 +97,22 @@ class WorkOrderService
     public function createWorkOrder(array $data, LocalUser $creator): WorkOrder
     {
         return DB::transaction(function () use ($data, $creator) {
+            // ── Auto-resolve shift personnel from rostering (if roster is published) ──
+            // When manager_id or supervisor_id are not provided in the request,
+            // attempt to resolve them from atoms-rostering's published roster.
+            // This replaces the manual selection requirement when a roster exists.
+            $data = $this->resolveShiftPersonnelFromRostering($data);
+
             // Generate WO number
             $woNumber = $this->generateWoNumber($data['division']);
 
             // Snapshot manager and supervisor names
             $manager = LocalUser::find($data['manager_id']);
-            $supervisor = LocalUser::find($data['supervisor_id']);
+            $supervisor = !empty($data['supervisor_id']) ? LocalUser::find($data['supervisor_id']) : null;
+            $hasSupervisor = array_key_exists('has_supervisor', $data)
+                ? (bool) $data['has_supervisor']
+                : $supervisor !== null;
+            $selectedTechnician = $this->selectTechnicianForShift($data);
 
             $workOrder = WorkOrder::create([
                 'wo_number' => $woNumber,
@@ -104,13 +120,18 @@ class WorkOrderService
                 'division' => $data['division'],
                 'shift_type' => $data['shift_type'],
                 'shift_date' => $data['shift_date'],
+                'shift_id' => $data['shift_id'] ?? null,
                 'description' => $data['description'],
-                'status' => $data['status'] ?? 'ongoing',
+                'status' => 'ongoing',
                 'manager_id' => $data['manager_id'],
-                'supervisor_id' => $data['supervisor_id'],
-                'assigned_technician_id' => $data['assigned_technician_id'] ?? null,
+                'supervisor_id' => $hasSupervisor ? ($data['supervisor_id'] ?? null) : null,
+                'assigned_technician_id' => $selectedTechnician?->id,
+                'has_supervisor' => $hasSupervisor,
                 'manager_name_snapshot' => $manager ? $manager->name : '',
-                'supervisor_name_snapshot' => $supervisor ? $supervisor->name : '',
+                'supervisor_name_snapshot' => $hasSupervisor && $supervisor ? $supervisor->name : null,
+                'mt_name' => $manager ? $manager->name : null,
+                'supervisor_name' => $hasSupervisor && $supervisor ? $supervisor->name : null,
+                'technician_name' => $selectedTechnician?->name,
                 'start_time' => $data['start_time'] ?? null,
                 'end_time' => $data['end_time'] ?? null,
                 'completion_status' => $data['completion_status'] ?? null,
@@ -136,7 +157,11 @@ class WorkOrderService
                 'outputs',
                 'manager:id,name',
                 'supervisor:id,name',
+                'assignedTechnician:id,name',
                 'creator:id,name',
+                'mtSigner:id,name',
+                'supervisorSigner:id,name',
+                'technicianSigner:id,name',
             ]);
 
             return $workOrder;
@@ -154,8 +179,7 @@ class WorkOrderService
             // Update main fields
             $updateFields = [];
             $allowedFields = [
-                'wo_type', 'division', 'shift_type', 'shift_date', 'description',
-                'status', 'manager_id', 'supervisor_id', 'assigned_technician_id',
+                'description',
                 'start_time', 'end_time', 'completion_status',
                 'notes_kendala', 'notes_usulan', 'notes_pemberi_tugas',
             ];
@@ -166,29 +190,8 @@ class WorkOrderService
                 }
             }
 
-            // Update name snapshots if manager/supervisor changed
-            if (isset($data['manager_id'])) {
-                $manager = LocalUser::find($data['manager_id']);
-                $updateFields['manager_name_snapshot'] = $manager ? $manager->name : '';
-            }
-
-            if (isset($data['supervisor_id'])) {
-                $supervisor = LocalUser::find($data['supervisor_id']);
-                $updateFields['supervisor_name_snapshot'] = $supervisor ? $supervisor->name : '';
-            }
-
-            // Set closed_at when status becomes completed
-            if (isset($data['status']) && $data['status'] === 'completed' && $oldStatus !== 'completed') {
-                $updateFields['closed_at'] = now();
-            }
-
             if (!empty($updateFields)) {
                 $workOrder->update($updateFields);
-            }
-
-            // Sync personnel if provided
-            if (isset($data['personnel'])) {
-                $this->syncPersonnel($workOrder, $data['personnel']);
             }
 
             // Sync output types if provided
@@ -196,16 +199,57 @@ class WorkOrderService
                 $this->syncOutputs($workOrder, $data['output_types'], $data['output_other'] ?? null);
             }
 
+            $workOrder->status = $workOrder->recalculateStatus();
+            if ($workOrder->status === 'completed' && $oldStatus !== 'completed') {
+                $workOrder->closed_at = now();
+            }
+            $workOrder->save();
+
             // Reload relationships
             $workOrder->load([
                 'personnel.user:id,name,role',
                 'outputs',
                 'manager:id,name',
                 'supervisor:id,name',
+                'assignedTechnician:id,name',
                 'creator:id,name',
+                'mtSigner:id,name',
+                'supervisorSigner:id,name',
+                'technicianSigner:id,name',
             ]);
 
             return $workOrder;
+        });
+    }
+
+    /**
+     * Save an immutable signature and recalculate status.
+     */
+    public function signWorkOrder(WorkOrder $workOrder, string $role, string $signature, LocalUser $signer): WorkOrder
+    {
+        return DB::transaction(function () use ($workOrder, $role, $signature, $signer) {
+            $role = strtolower(trim($role));
+
+            if ($workOrder->status === 'completed') {
+                throw new RuntimeException('Completed work orders cannot be signed.');
+            }
+
+            if (!in_array($role, $workOrder->getRequiredSignatures(), true)) {
+                throw new InvalidArgumentException('This signature role is not required for this work order.');
+            }
+
+            $this->assertSignerCanSignRole($workOrder, $role, $signer);
+
+            $oldStatus = $workOrder->status;
+            $workOrder->saveSignature($role, $signature, $signer->id);
+            $workOrder->refresh();
+
+            if ($workOrder->status === 'completed' && $oldStatus !== 'completed') {
+                $workOrder->closed_at = now();
+                $workOrder->save();
+            }
+
+            return $this->getWorkOrder($workOrder->id);
         });
     }
 
@@ -225,16 +269,147 @@ class WorkOrderService
     {
         $today = now();
         $dateStr = $today->format('d-m-Y');
-        $prefix = "WO-{$division}-{$dateStr}";
+        $prefix = 'WO-' . $division . '-' . $dateStr;
+        $likePrefix = $prefix . '%';
 
         // Count existing WOs for this division and date
         $count = WorkOrder::withTrashed()
-            ->where('wo_number', 'LIKE', "{$prefix}%")
+            ->where('wo_number', 'LIKE', $likePrefix)
             ->count();
 
         $seq = str_pad($count + 1, 3, '0', STR_PAD_LEFT);
 
-        return "{$prefix}-{$seq}";
+        return $prefix . '-' . $seq;
+    }
+
+    /**
+     * Attempt to auto-resolve manager_id and supervisor_id from atoms-rostering
+     * when they are not explicitly provided in the Work Order creation request.
+     *
+     * Strategy:
+     * - If manager_id is missing: look up the MT on duty for this shift/date in rostering.
+     *   If found and a matching local_user exists (by rostering_user_id), use it.
+     * - If supervisor_id is missing: look up the supervisor-level CNS for this shift/date.
+     *   If found and a matching local_user exists, use it. Sets has_supervisor accordingly.
+     *
+     * Falls back gracefully — if rostering has no published roster or local_users cache
+     * doesn't have the rostering user, the original $data is returned unchanged.
+     *
+     * @param  array  $data  Validated Work Order creation data
+     * @return array  $data with manager_id / supervisor_id / has_supervisor potentially filled
+     */
+    private function resolveShiftPersonnelFromRostering(array $data): array
+    {
+        // Only attempt resolution if shift_type and shift_date are present
+        if (empty($data['shift_type']) || empty($data['shift_date'])) {
+            return $data;
+        }
+
+        try {
+            $rosteringService = app(\App\Services\RosteringIntegrationService::class);
+            $shiftType = $data['shift_type'];
+            $shiftDate = $data['shift_date'];
+
+            // ── Auto-resolve Manager Teknik ──────────────────────────────────────
+            if (empty($data['manager_id'])) {
+                $rosteringManager = $rosteringService->getShiftManager($shiftType, $shiftDate);
+                if ($rosteringManager) {
+                    $localManager = LocalUser::where('rostering_user_id', $rosteringManager->user_id)
+                        ->where('is_active', true)
+                        ->first();
+                    if ($localManager) {
+                        $data['manager_id'] = $localManager->id;
+                    }
+                }
+            }
+
+            // ── Auto-resolve Supervisor ──────────────────────────────────────────
+            // Only resolve if has_supervisor is not explicitly set to false
+            $supervisorExplicitlyDisabled = array_key_exists('has_supervisor', $data)
+                && $data['has_supervisor'] === false;
+
+            if (!$supervisorExplicitlyDisabled && empty($data['supervisor_id'])) {
+                $rosteringSupervisor = $rosteringService->getShiftSupervisor($shiftType, $shiftDate);
+                if ($rosteringSupervisor) {
+                    $localSupervisor = LocalUser::where('rostering_user_id', $rosteringSupervisor->user_id)
+                        ->where('is_active', true)
+                        ->first();
+                    if ($localSupervisor) {
+                        $data['supervisor_id'] = $localSupervisor->id;
+                        // Only set has_supervisor if not already explicitly provided
+                        if (!array_key_exists('has_supervisor', $data)) {
+                            $data['has_supervisor'] = true;
+                        }
+                    }
+                } else {
+                    // No supervisor-level CNS in this shift — mark has_supervisor false
+                    if (!array_key_exists('has_supervisor', $data)) {
+                        $data['has_supervisor'] = false;
+                    }
+                }
+            }
+        } catch (\Exception $e) {
+            // Rostering unavailable — proceed with original data, no auto-resolve
+            \Illuminate\Support\Facades\Log::info(
+                'WorkOrderService: rostering auto-resolve skipped (rostering unavailable)',
+                ['error' => $e->getMessage()]
+            );
+        }
+
+        return $data;
+    }
+
+    /**
+     * Select the technician snapshot for a new work order using shift round-robin.
+     */
+    private function selectTechnicianForShift(array $data): ?LocalUser
+    {
+        $technicianIds = collect($data['personnel'] ?? [])
+            ->pluck('user_id')
+            ->filter()
+            ->unique()
+            ->values();
+
+        $technicians = LocalUser::whereIn('id', $technicianIds)
+            ->whereIn('role', ['Teknisi CNSD', 'Teknisi TFP'])
+            ->orderBy('id')
+            ->get();
+
+        if ($technicians->isEmpty()) {
+            return null;
+        }
+
+        $countQuery = WorkOrder::query()
+            ->where('division', $data['division'])
+            ->where('shift_date', $data['shift_date'])
+            ->where('shift_type', $data['shift_type']);
+
+        if (!empty($data['shift_id'])) {
+            $countQuery->where('shift_id', $data['shift_id']);
+        }
+
+        $recordCount = $countQuery->count();
+        $selectedIndex = $recordCount % $technicians->count();
+
+        return $technicians[$selectedIndex];
+    }
+
+    private function assertSignerCanSignRole(WorkOrder $workOrder, string $role, LocalUser $signer): void
+    {
+        $allowed = match ($role) {
+            'mt' => $signer->isManager(),
+            'supervisor' => $signer->isSupervisor() && (
+                !$workOrder->supervisor_id || $workOrder->supervisor_id === $signer->id
+            ),
+            'technician' => $signer->isTeknisi() && (
+                !$workOrder->assigned_technician_id || $workOrder->assigned_technician_id === $signer->id
+            ),
+            default => false,
+        };
+
+        if (!$allowed) {
+            throw new RuntimeException('Authenticated user is not allowed to sign for this role.');
+        }
     }
 
     /**

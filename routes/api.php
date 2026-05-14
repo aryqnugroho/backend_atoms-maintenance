@@ -27,6 +27,8 @@ Route::prefix('v1')->group(function () {
 
         // Update: all roles can attempt (policy enforces per-resource rules)
         Route::put('/work-orders/{id}', [WorkOrderController::class, 'update']);
+        Route::post('/work-orders/{id}/sign', [WorkOrderController::class, 'sign']);
+        Route::get('/work-orders/{id}/print', [WorkOrderController::class, 'print']);
 
         // Delete: Admin and Manager only
         Route::delete('/work-orders/{id}', [WorkOrderController::class, 'destroy'])
@@ -34,6 +36,8 @@ Route::prefix('v1')->group(function () {
 
         // ─── Personnel ─────────────────────────────────────────
         Route::get('/personnel', [PersonnelController::class, 'index']);
+        // Real shift context from atoms-rostering (read-only DB query)
+        Route::get('/personnel/shift-today', [PersonnelController::class, 'shiftToday']);
 
         // ─── Notifications ─────────────────────────────────────
         Route::get('/notifications', [NotificationController::class, 'index']);

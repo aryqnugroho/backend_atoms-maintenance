@@ -80,10 +80,18 @@ This document defines the phased development workflow for the ATOMS-Maintenance 
 - [ ] Verify: Frontend Dashboard shows real aggregated data
 
 ### Phase 9: SSO Integration
-- [ ] Implement token proxy middleware (validates against rostering)
-- [ ] Implement user sync from rostering to `local_users`
-- [ ] Remove mock auth dependency for production
-- [ ] Verify: Login via rostering SSO works end-to-end
+- [x] Add `rostering` read-only DB connection to `config/database.php` (2026-05-15)
+- [x] Add `ROSTERING_DB_*` env vars to `.env` and `.env.example` (2026-05-15)
+- [x] Create `RosteringIntegrationService` — wraps all rostering DB queries (2026-05-15)
+- [x] Add `GET /api/v1/personnel/shift-today` endpoint — returns real shift context from rostering (2026-05-15)
+- [x] Update `WorkOrder::isShiftEnded()` to use `RosteringIntegrationService::isShiftEnded()` (2026-05-15)
+- [x] Wire Work Order creation to auto-resolve MT/supervisor from rostering when roster is published (2026-05-15)
+- [x] Add `ShiftContextResponse` TypeScript interface to frontend types (2026-05-15)
+- [x] Add `workOrderService.getShiftContext()` method to frontend service layer (2026-05-15)
+- [x] Update `WorkOrderFormModal` to load real shift context from rostering API with mock fallback (2026-05-15)
+- [ ] Implement user sync from rostering to `local_users` (future)
+- [ ] Remove mock auth dependency for production (future)
+- [ ] Verify: Login via rostering SSO works end-to-end (future)
 
 ### Phase 10: Polish & Hardening
 - [ ] Write integration tests for critical endpoints

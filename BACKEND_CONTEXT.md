@@ -25,8 +25,8 @@ The ATOMS-Maintenance backend is a **standalone Laravel API** that powers the ma
 |------|--------|-----------------------------|
 | User login & tokens | atoms-rostering | SSO / shared Sanctum token validation |
 | Employee profiles | atoms-rostering | API call or shared read-only DB view |
-| Current shift & personnel | atoms-rostering | API call (`GET /roster/today`) |
-| Shift definitions (pagi/siang/malam) | atoms-rostering | Cached reference data |
+| Current shift & personnel | atoms-rostering | ✅ `GET /api/v1/personnel/shift-today` → `RosteringIntegrationService` |
+| Shift definitions (pagi/siang/malam) | atoms-rostering | ✅ Read via `rostering` DB connection |
 | Work Orders | atoms-maintenance | Local DB (owned) |
 | Inspections (CNSD/TFP) | atoms-maintenance | Local DB (owned) |
 | Reports & Logbooks | atoms-maintenance | Local DB (owned) |
@@ -125,3 +125,67 @@ Allow frontend and backend development to proceed independently of atoms-rosteri
 | 5 | Iqbal Mustika | Teknisi TFP | TFP |
 | 6 | Argo Pragolo | Teknisi CNSD | CNSD |
 | 7 | Admin System | Admin | — |
+
+---
+
+## Current Work Order API and Signature State (2026-05-12)
+
+This section reflects the implemented backend state after the Work Order signature pass.
+
+### Implemented API Endpoints
+
+All endpoints are under `/api/v1` and return the standard response wrapper:
+`{ success, message, data, errors }`.
+
+| Method | URI | Auth | Description |
+|--------|-----|------|-------------|
+| POST | `/auth/login` | Public | Mock login in development mode. |
+| GET | `/auth/me` | Bearer/mockauth | Return current authenticated local user. |
+| POST | `/auth/logout` | Bearer/mockauth | Logout current mock session. |
+| GET | `/work-orders` | Bearer/mockauth | Paginated/filterable Work Order list. |
+| POST | `/work-orders` | Bearer/mockauth + role | Create Work Order. Status is derived, not accepted from client. |
+| GET | `/work-orders/{id}` | Bearer/mockauth | Work Order detail. |
+| PUT | `/work-orders/{id}` | Bearer/mockauth + policy | Update editable Work Order fields. |
+| DELETE | `/work-orders/{id}` | Bearer/mockauth + Admin/Manager Teknik | Soft-delete Work Order. |
+| POST | `/work-orders/{id}/sign` | Bearer/mockauth + policy | Save immutable base64 PNG signature for `mt`, `supervisor`, or `technician`. |
+| GET | `/work-orders/{id}/print` | Bearer/mockauth + policy | Return full print data, including required/pending signatures. |
+| GET | `/personnel` | Bearer/mockauth | Return active `local_users` for dropdowns. |
+| GET | `/notifications` | Bearer/mockauth | Return notifications. |
+| PUT | `/notifications/{id}/read` | Bearer/mockauth | Mark one notification as read. |
+| PUT | `/notifications/read-all` | Bearer/mockauth | Mark all notifications as read. |
+
+### Work Order Signature Implementation
+
+- Shared trait: `app/Traits/HasSignature.php`.
+- Work Order model uses `HasSignature` and `SoftDeletes`.
+- Signature columns live on `work_orders`: `mt_name`, `mt_signature`, `mt_signed_by`, `mt_signed_at`, `supervisor_name`, `supervisor_signature`, `supervisor_signed_by`, `supervisor_signed_at`, `technician_name`, `technician_signature`, `technician_signed_by`, `technician_signed_at`.
+- Signatures are base64 PNG data URLs stored directly in database long text fields. No file upload or filesystem storage is used.
+- Signatures are immutable. A role cannot overwrite an existing signature.
+- Required Work Order signatures are `mt`, `supervisor`, and `technician` when `has_supervisor = true`; otherwise only `mt` and `technician`.
+- Work Order statuses are authoritative as `ongoing`, `on_hold`, and `completed`.
+- Status is derived from signatures and shift timing; clients must not manually set status.
+
+### Local Users Cache
+
+Table: `local_users`.
+
+Structure:
+- `id`
+- `rostering_user_id`
+- `name`
+- `email`
+- `role`
+- `division`
+- `is_active`
+- `synced_at`
+- timestamps
+- `deleted_at`
+
+This table is the maintenance-side cache for authenticated users and signer references. It is not the source of truth for rostering data.
+
+### Known Remaining Backend Gaps
+
+- ~~A named read-only rostering DB connection is not configured yet.~~ **RESOLVED (2026-05-15):** Koneksi `rostering` sudah dikonfigurasi di `config/database.php` dan env vars `ROSTERING_DB_*` sudah ditambahkan. `RosteringIntegrationService` sudah dibuat di `app/Services/RosteringIntegrationService.php`. Endpoint `GET /api/v1/personnel/shift-today` sudah tersedia.
+- ~~Work Order `isShiftEnded()` di model `WorkOrder` masih menggunakan hardcoded fallback times.~~ **RESOLVED (2026-05-15):** `WorkOrder::isShiftEnded()` sekarang menggunakan `RosteringIntegrationService::isShiftEnded()` dengan fallback ke hardcoded jika rostering tidak tersedia. `WorkOrderService::createWorkOrder()` sekarang auto-resolve MT dan supervisor dari rostering jika roster dipublish.
+- CNSD is scaffold-only. TFP, Ground Check, Grounding, Logbook, and Reporting backend modules are not yet implemented.
+- Future modules must reuse `HasSignature` instead of creating module-specific signature logic.

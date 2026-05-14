@@ -3,16 +3,19 @@
 namespace App\Http\Controllers\Api\V1\WorkOrder;
 
 use App\Http\Controllers\Controller;
-use App\Http\Requests\WorkOrder\StoreWorkOrderRequest;
-use App\Http\Requests\WorkOrder\UpdateWorkOrderRequest;
+use App\Http\Requests\WorkOrder\WorkOrderCreateRequest;
+use App\Http\Requests\WorkOrder\WorkOrderSignRequest;
+use App\Http\Requests\WorkOrder\WorkOrderUpdateRequest;
 use App\Models\WorkOrder\WorkOrder;
 use App\Services\NotificationService;
 use App\Services\WorkOrderService;
 use App\Traits\ApiResponse;
+use InvalidArgumentException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Gate;
+use RuntimeException;
 
 class WorkOrderController extends Controller
 {
@@ -69,7 +72,7 @@ class WorkOrderController extends Controller
         }
 
         return $this->success(
-            $this->transformWorkOrder($workOrder),
+            $this->transformWorkOrder($workOrder, true),
             'Work order retrieved successfully'
         );
     }
@@ -77,7 +80,7 @@ class WorkOrderController extends Controller
     /**
      * Store a newly created work order.
      */
-    public function store(StoreWorkOrderRequest $request): JsonResponse
+    public function store(WorkOrderCreateRequest $request): JsonResponse
     {
         $user = Auth::user();
 
@@ -99,7 +102,7 @@ class WorkOrderController extends Controller
     /**
      * Update the specified work order.
      */
-    public function update(UpdateWorkOrderRequest $request, $id): JsonResponse
+    public function update(WorkOrderUpdateRequest $request, $id): JsonResponse
     {
         $workOrder = WorkOrder::find($id);
 
@@ -155,15 +158,78 @@ class WorkOrderController extends Controller
     }
 
     /**
+     * Save a role signature for the work order.
+     */
+    public function sign(WorkOrderSignRequest $request, $id): JsonResponse
+    {
+        $workOrder = WorkOrder::find($id);
+
+        if (!$workOrder) {
+            return $this->error('Work order not found.', null, 404);
+        }
+
+        $user = Auth::user();
+        if (Gate::forUser($user)->denies('update', $workOrder)) {
+            return $this->error('Unauthorized. You cannot sign this work order.', null, 403);
+        }
+
+        $validated = $request->validated();
+
+        try {
+            $workOrder = $this->workOrderService->signWorkOrder(
+                $workOrder,
+                $validated['role'],
+                $validated['signature'],
+                $user
+            );
+        } catch (InvalidArgumentException $exception) {
+            return $this->error($exception->getMessage(), null, 422);
+        } catch (RuntimeException $exception) {
+            return $this->error($exception->getMessage(), null, 409);
+        }
+
+        return $this->success([
+            'signed_role' => $validated['role'],
+            'pending_roles' => $workOrder->getPendingSignatures(),
+            'current_status' => $workOrder->status,
+            'record' => $this->transformWorkOrder($workOrder, true),
+        ], 'Signature saved successfully');
+    }
+
+    /**
+     * Return the full data structure needed by the print view.
+     */
+    public function print($id): JsonResponse
+    {
+        $workOrder = $this->workOrderService->getWorkOrder($id);
+
+        if (!$workOrder) {
+            return $this->error('Work order not found.', null, 404);
+        }
+
+        $user = Auth::user();
+        if (Gate::forUser($user)->denies('view', $workOrder)) {
+            return $this->error('Unauthorized. You do not have access to this work order.', null, 403);
+        }
+
+        return $this->success([
+            'work_order' => $this->transformWorkOrder($workOrder, true),
+            'required_signatures' => $workOrder->getRequiredSignatures(),
+            'pending_signatures' => $workOrder->getPendingSignatures(),
+        ], 'Work order print data retrieved successfully');
+    }
+
+    /**
      * Transform a WorkOrder model to the response shape expected by the frontend.
      */
-    private function transformWorkOrder(WorkOrder $wo): array
+    private function transformWorkOrder(WorkOrder $wo, bool $includeSignatures = false): array
     {
-        return [
+        $data = [
             'id' => $wo->id,
             'wo_number' => $wo->wo_number,
             'wo_type' => $wo->wo_type,
             'division' => $wo->division,
+            'shift_id' => $wo->shift_id,
             'shift_type' => $wo->shift_type,
             'shift_date' => $wo->shift_date?->format('Y-m-d'),
             'description' => $wo->description,
@@ -171,8 +237,12 @@ class WorkOrderController extends Controller
             'manager_id' => $wo->manager_id,
             'supervisor_id' => $wo->supervisor_id,
             'assigned_technician_id' => $wo->assigned_technician_id,
+            'has_supervisor' => $wo->has_supervisor,
             'manager_name_snapshot' => $wo->manager_name_snapshot,
             'supervisor_name_snapshot' => $wo->supervisor_name_snapshot,
+            'mt_name' => $wo->mt_name,
+            'supervisor_name' => $wo->supervisor_name,
+            'technician_name' => $wo->technician_name,
             'start_time' => $wo->start_time,
             'end_time' => $wo->end_time,
             'completion_status' => $wo->completion_status,
@@ -183,6 +253,8 @@ class WorkOrderController extends Controller
             'created_at' => $wo->created_at?->toISOString(),
             'updated_at' => $wo->updated_at?->toISOString(),
             'closed_at' => $wo->closed_at?->toISOString(),
+            'required_signatures' => $wo->getRequiredSignatures(),
+            'pending_signatures' => $wo->getPendingSignatures(),
             // Nested relations
             'manager' => $wo->manager ? [
                 'id' => $wo->manager->id,
@@ -197,7 +269,6 @@ class WorkOrderController extends Controller
                     'user_id' => $p->user_id,
                     'name' => $p->user?->name ?? '',
                     'role_label' => $p->role_label,
-                    'signature_url' => null,
                 ];
             })->values()->toArray(),
             'output_types' => $wo->outputs->pluck('output_type')->values()->toArray(),
@@ -205,5 +276,30 @@ class WorkOrderController extends Controller
                 ->where('output_type', 'other')
                 ->first()?->output_other,
         ];
+
+        if ($includeSignatures) {
+            $data['signatures'] = [
+                'mt' => [
+                    'name' => $wo->mt_name,
+                    'signature' => $wo->mt_signature,
+                    'signed_by' => $wo->mt_signed_by,
+                    'signed_at' => $wo->mt_signed_at?->toISOString(),
+                ],
+                'supervisor' => [
+                    'name' => $wo->supervisor_name,
+                    'signature' => $wo->supervisor_signature,
+                    'signed_by' => $wo->supervisor_signed_by,
+                    'signed_at' => $wo->supervisor_signed_at?->toISOString(),
+                ],
+                'technician' => [
+                    'name' => $wo->technician_name,
+                    'signature' => $wo->technician_signature,
+                    'signed_by' => $wo->technician_signed_by,
+                    'signed_at' => $wo->technician_signed_at?->toISOString(),
+                ],
+            ];
+        }
+
+        return $data;
     }
 }

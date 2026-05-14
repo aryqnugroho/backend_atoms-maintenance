@@ -99,6 +99,24 @@ return [
             'sslmode' => env('DB_SSLMODE', 'prefer'),
         ],
 
+        // ─── Rostering DB (READ-ONLY) ──────────────────────────────────────────
+        // Second connection pointing to atoms-rostering's PostgreSQL database.
+        // NEVER use this connection for INSERT / UPDATE / DELETE operations.
+        // Source of truth for: users, employees, shifts, roster schedules.
+        'rostering' => [
+            'driver' => 'pgsql',
+            'host' => env('ROSTERING_DB_HOST', '127.0.0.1'),
+            'port' => env('ROSTERING_DB_PORT', '5432'),
+            'database' => env('ROSTERING_DB_DATABASE', 'atoms_rostering'),
+            'username' => env('ROSTERING_DB_USERNAME', 'postgres'),
+            'password' => env('ROSTERING_DB_PASSWORD', ''),
+            'charset' => 'utf8',
+            'prefix' => '',
+            'prefix_indexes' => true,
+            'search_path' => 'public',
+            'sslmode' => 'prefer',
+        ],
+
         'sqlsrv' => [
             'driver' => 'sqlsrv',
             'url' => env('DB_URL'),
