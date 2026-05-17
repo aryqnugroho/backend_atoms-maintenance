@@ -13,8 +13,9 @@ return Application::configure(basePath: dirname(__DIR__))
     )
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->alias([
-            'mockauth' => \App\Http\Middleware\MockAuthMiddleware::class,
-            'role' => \App\Http\Middleware\CheckRole::class,
+            'mockauth'        => \App\Http\Middleware\MockAuthMiddleware::class,
+            'rostering.auth'  => \App\Http\Middleware\VerifyRosteringToken::class,
+            'role'            => \App\Http\Middleware\CheckRole::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

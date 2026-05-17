@@ -138,60 +138,16 @@ class RosteringIntegrationService
 
     /**
      * Get the Manager Teknik assigned to a specific shift on a given date.
-     * Returns the first MT found for that shift (there should be exactly one).
+     *
+     * The MT is stored in `shift_assignments` with `employees.employee_type = 'Manager Teknik'`.
+     * The legacy `manager_duties` table is unused in current data, so this method
+     * resolves MT from the same shift_assignments path as regular personnel.
      *
      * @param  string  $shiftType  'pagi' | 'siang' | 'malam'
      * @param  string  $date       'Y-m-d'
-     * @return object{user_id, name, role, employee_type}|null
+     * @return object{user_id, name, role, employee_type, group_number}|null
      */
     public function getShiftManager(string $shiftType, string $date): ?object
-    {
-        try {
-            return DB::connection('rostering')
-                ->table('manager_duties as md')
-                ->join('roster_days as rd', 'rd.id', '=', 'md.roster_day_id')
-                ->join('roster_periods as rp', 'rp.id', '=', 'rd.roster_period_id')
-                ->join('employees as e', 'e.id', '=', 'md.employee_id')
-                ->join('users as u', 'u.id', '=', 'e.user_id')
-                ->join('shifts as s', 's.id', '=', 'md.shift_id')
-                ->where('rd.work_date', $date)
-                ->where('rp.status', 'published')
-                ->where('md.duty_type', 'Manager Teknik')
-                ->where('s.name', strtolower($shiftType))
-                ->whereNull('md.deleted_at')
-                ->whereNull('rd.deleted_at')
-                ->whereNull('e.deleted_at')
-                ->whereNull('u.deleted_at')
-                ->where('u.is_active', true)
-                ->select(
-                    'u.id as user_id',
-                    'u.name',
-                    'u.role',
-                    'e.employee_type'
-                )
-                ->first();
-        } catch (\Exception $e) {
-            Log::warning('RosteringIntegrationService::getShiftManager failed', [
-                'shift_type' => $shiftType,
-                'date'       => $date,
-                'error'      => $e->getMessage(),
-            ]);
-            return null;
-        }
-    }
-
-    /**
-     * Get the Supervisor (CNS employee with grade >= 13) for a shift.
-     * Returns null if no supervisor-level CNS is assigned (has_supervisor = false).
-     *
-     * In atoms-rostering, "Supervisor" = CNS employee with grade 13 (SVP CNS)
-     * or grade 14 (SPV CNS). There is no separate supervisor role.
-     *
-     * @param  string  $shiftType  'pagi' | 'siang' | 'malam'
-     * @param  string  $date       'Y-m-d'
-     * @return object{user_id, name, role, grade}|null
-     */
-    public function getShiftSupervisor(string $shiftType, string $date): ?object
     {
         try {
             return DB::connection('rostering')
@@ -204,8 +160,7 @@ class RosteringIntegrationService
                 ->where('rd.work_date', $date)
                 ->where('rp.status', 'published')
                 ->where('s.name', strtolower($shiftType))
-                ->where('e.employee_type', 'CNS')
-                ->where('u.grade', '>=', 13) // grade 13 = SVP CNS, grade 14 = SPV CNS
+                ->where('e.employee_type', 'Manager Teknik')
                 ->whereNull('sa.deleted_at')
                 ->whereNull('rd.deleted_at')
                 ->whereNull('e.deleted_at')
@@ -215,18 +170,82 @@ class RosteringIntegrationService
                     'u.id as user_id',
                     'u.name',
                     'u.role',
-                    'u.grade'
+                    'e.employee_type',
+                    'e.group_number'
                 )
-                ->orderByDesc('u.grade') // highest grade first (SVP before SPV)
+                ->orderBy('u.name')
                 ->first();
         } catch (\Exception $e) {
-            Log::warning('RosteringIntegrationService::getShiftSupervisor failed', [
+            Log::warning('RosteringIntegrationService::getShiftManager failed', [
                 'shift_type' => $shiftType,
                 'date'       => $date,
                 'error'      => $e->getMessage(),
             ]);
             return null;
         }
+    }
+
+    /**
+     * Get the Supervisor for a shift, restricted to a single employee_type
+     * (CNS for CNSD, Support for TFP).
+     *
+     * In atoms-rostering, a "Supervisor" is an employee on this shift whose
+     * grade is at the supervisor threshold (>= 13). There is no separate
+     * supervisor role.
+     *
+     * @param  string  $shiftType    'pagi' | 'siang' | 'malam'
+     * @param  string  $date         'Y-m-d'
+     * @param  string  $employeeType 'CNS' (CNSD) or 'Support' (TFP)
+     * @return object{user_id, name, role, grade, employee_type}|null
+     */
+    public function getShiftSupervisorByDivision(string $shiftType, string $date, string $employeeType): ?object
+    {
+        try {
+            return DB::connection('rostering')
+                ->table('shift_assignments as sa')
+                ->join('roster_days as rd', 'rd.id', '=', 'sa.roster_day_id')
+                ->join('roster_periods as rp', 'rp.id', '=', 'rd.roster_period_id')
+                ->join('employees as e', 'e.id', '=', 'sa.employee_id')
+                ->join('users as u', 'u.id', '=', 'e.user_id')
+                ->join('shifts as s', 's.id', '=', 'sa.shift_id')
+                ->where('rd.work_date', $date)
+                ->where('rp.status', 'published')
+                ->where('s.name', strtolower($shiftType))
+                ->where('e.employee_type', $employeeType)
+                ->where('u.grade', '>=', 13) // grade 13 = SVP, grade 14 = SPV
+                ->whereNull('sa.deleted_at')
+                ->whereNull('rd.deleted_at')
+                ->whereNull('e.deleted_at')
+                ->whereNull('u.deleted_at')
+                ->where('u.is_active', true)
+                ->select(
+                    'u.id as user_id',
+                    'u.name',
+                    'u.role',
+                    'u.grade',
+                    'e.employee_type'
+                )
+                ->orderByDesc('u.grade')
+                ->first();
+        } catch (\Exception $e) {
+            Log::warning('RosteringIntegrationService::getShiftSupervisorByDivision failed', [
+                'shift_type'    => $shiftType,
+                'date'          => $date,
+                'employee_type' => $employeeType,
+                'error'         => $e->getMessage(),
+            ]);
+            return null;
+        }
+    }
+
+    /**
+     * Backward-compatible: get any single supervisor on the shift, preferring CNS.
+     * Used by Work Order creation when no division split is needed yet.
+     */
+    public function getShiftSupervisor(string $shiftType, string $date): ?object
+    {
+        return $this->getShiftSupervisorByDivision($shiftType, $date, 'CNS')
+            ?? $this->getShiftSupervisorByDivision($shiftType, $date, 'Support');
     }
 
     /**
@@ -241,6 +260,8 @@ class RosteringIntegrationService
      *   shift_times: array|null,
      *   manager: object|null,
      *   supervisor: object|null,
+     *   supervisor_cnsd: object|null,
+     *   supervisor_tfp: object|null,
      *   personnel: Collection,
      *   has_supervisor: bool,
      *   roster_available: bool
@@ -248,20 +269,26 @@ class RosteringIntegrationService
      */
     public function getShiftContext(string $shiftType, string $date): array
     {
-        $shiftTimes  = $this->getShiftTimes($shiftType);
-        $manager     = $this->getShiftManager($shiftType, $date);
-        $supervisor  = $this->getShiftSupervisor($shiftType, $date);
-        $personnel   = $this->getShiftPersonnel($shiftType, $date);
+        $shiftTimes        = $this->getShiftTimes($shiftType);
+        $manager           = $this->getShiftManager($shiftType, $date);
+        $supervisorCnsd    = $this->getShiftSupervisorByDivision($shiftType, $date, 'CNS');
+        $supervisorTfp     = $this->getShiftSupervisorByDivision($shiftType, $date, 'Support');
+        $personnel         = $this->getShiftPersonnel($shiftType, $date);
+
+        // Backward-compatible primary supervisor (CNS preferred, fallback Support)
+        $supervisor = $supervisorCnsd ?? $supervisorTfp;
 
         return [
-            'date'             => $date,
-            'shift_type'       => $shiftType,
-            'shift_times'      => $shiftTimes,
-            'manager'          => $manager,
-            'supervisor'       => $supervisor,
-            'personnel'        => $personnel,
-            'has_supervisor'   => $supervisor !== null,
-            'roster_available' => $personnel->isNotEmpty() || $manager !== null,
+            'date'              => $date,
+            'shift_type'        => $shiftType,
+            'shift_times'       => $shiftTimes,
+            'manager'           => $manager,
+            'supervisor'        => $supervisor,
+            'supervisor_cnsd'   => $supervisorCnsd,
+            'supervisor_tfp'    => $supervisorTfp,
+            'personnel'         => $personnel,
+            'has_supervisor'    => $supervisor !== null,
+            'roster_available'  => $personnel->isNotEmpty() || $manager !== null,
         ];
     }
 

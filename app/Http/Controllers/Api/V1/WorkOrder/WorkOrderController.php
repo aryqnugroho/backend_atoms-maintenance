@@ -38,7 +38,7 @@ class WorkOrderController extends Controller
 
         $filters = $request->only([
             'division', 'status', 'shift_date', 'shift_type',
-            'wo_type', 'search', 'sort_by', 'sort_dir',
+            'wo_type', 'search', 'sort_by', 'sort_dir', 'year',
         ]);
 
         $perPage = (int) $request->input('per_page', 15);
@@ -182,9 +182,13 @@ class WorkOrderController extends Controller
                 $validated['signature'],
                 $user
             );
+        } catch (\App\Exceptions\SignerNotAuthorizedException $exception) {
+            // 403 — wrong user trying to sign on behalf of someone else
+            return $this->error($exception->getMessage(), null, 403);
         } catch (InvalidArgumentException $exception) {
             return $this->error($exception->getMessage(), null, 422);
         } catch (RuntimeException $exception) {
+            // Generic conflict (already signed, completed WO, etc.)
             return $this->error($exception->getMessage(), null, 409);
         }
 
@@ -194,6 +198,28 @@ class WorkOrderController extends Controller
             'current_status' => $workOrder->status,
             'record' => $this->transformWorkOrder($workOrder, true),
         ], 'Signature saved successfully');
+    }
+
+    /**
+     * Return distinct years available in shift_date, descending.
+     * Used by the frontend year-filter dropdown.
+     */
+    public function years(): JsonResponse
+    {
+        $years = WorkOrder::selectRaw('EXTRACT(YEAR FROM shift_date)::int AS y')
+            ->whereNotNull('shift_date')
+            ->groupBy('y')
+            ->orderByDesc('y')
+            ->pluck('y')
+            ->values();
+
+        // Always include current year even if no WOs exist yet
+        $currentYear = (int) now()->format('Y');
+        if (!$years->contains($currentYear)) {
+            $years = collect([$currentYear])->merge($years)->values();
+        }
+
+        return $this->success($years, 'Available years retrieved');
     }
 
     /**

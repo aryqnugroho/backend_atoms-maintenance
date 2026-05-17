@@ -23,13 +23,21 @@ class WorkOrderCreateRequest extends FormRequest
             'shift_type' => ['required', 'string', Rule::in(WorkOrder::SHIFT_TYPES)],
             'shift_date' => ['required', 'date'],
             'description' => ['required', 'string', 'min:10'],
-            'manager_id' => ['nullable', 'integer', 'exists:local_users,id'],
-            'supervisor_id' => ['nullable', 'integer', 'exists:local_users,id'],
+            // Manager/supervisor/technician IDs are rostering_user_ids.
+            // The service maps them to local_users.id and creates rows lazily.
+            // Hence no `exists:local_users,id` constraint here.
+            'manager_id' => ['nullable', 'integer'],
+            'supervisor_id' => ['nullable', 'integer'],
+            'assigned_technician_id' => ['nullable', 'integer'],
             'has_supervisor' => ['sometimes', 'boolean'],
 
-            'personnel' => ['required', 'array', 'min:1'],
-            'personnel.*.user_id' => ['required', 'integer', 'exists:local_users,id'],
-            'personnel.*.role_label' => ['required', 'string', 'max:50'],
+            // Personnel is optional. For wo_type='shift' the backend auto-fills
+            // the technician list from the rostering shift+division when omitted.
+            // For wo_type='personal' the WorkOrderService selects the assigned
+            // technician via assigned_technician_id, so personnel can be empty.
+            'personnel' => ['sometimes', 'array'],
+            'personnel.*.user_id' => ['required_with:personnel', 'integer'],
+            'personnel.*.role_label' => ['required_with:personnel', 'string', 'max:50'],
 
             'output_types' => ['required', 'array', 'min:1'],
             'output_types.*' => ['string', Rule::in(WorkOrderOutput::OUTPUT_TYPES)],

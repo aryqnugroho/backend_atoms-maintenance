@@ -8,6 +8,16 @@ use App\Models\WorkOrder\WorkOrderOutput;
 use App\Models\WorkOrder\WorkOrderPersonnel;
 use Illuminate\Database\Seeder;
 
+/**
+ * @deprecated 2026-05-16
+ *
+ * The Work Order database starts empty by design. Do NOT register this
+ * seeder in DatabaseSeeder. It exists only as a historical reference for
+ * the Work Order signature/status demo flow.
+ *
+ * Sample data should be created through the real UI flow so that
+ * personnel mappings reflect live rostering data.
+ */
 class WorkOrderSeeder extends Seeder
 {
     /**
@@ -15,6 +25,8 @@ class WorkOrderSeeder extends Seeder
      */
     public function run(): void
     {
+        $this->command?->warn('WorkOrderSeeder is deprecated. Work Orders should start empty.');
+
         $mt = $this->upsertUser(1, 'Dudik Fahrudin', 'dudik@airnav.co.id', 'Manager Teknik', 'Management');
         $supervisor = $this->upsertUser(2, 'Moch. Ichsan', 'ichsan@airnav.co.id', 'Supervisor CNSD', 'CNSD');
         $technician = $this->upsertUser(4, 'Khoirul M.A', 'khoirul@airnav.co.id', 'Teknisi CNSD', 'CNSD');

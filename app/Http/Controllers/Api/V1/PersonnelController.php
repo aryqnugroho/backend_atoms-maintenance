@@ -49,19 +49,25 @@ class PersonnelController extends Controller
      * Returns the real shift context for a given date and shift type,
      * sourced directly from atoms-rostering's database (read-only).
      *
-     * Query params:
-     *   - date       (optional) Y-m-d, defaults to today
-     *   - shift_type (optional) pagi|siang|malam, defaults to current time-based shift
+     * Filters: BOTH date AND shift_type. The frontend MUST pass shift_type
+     * because the backend runs in UTC and cannot reliably auto-detect the
+     * Indonesian working shift from server time.
      *
-     * Response includes: manager, supervisor, personnel list, has_supervisor flag,
-     * shift times, and whether a published roster exists for that date.
+     * Query params:
+     *   - date       (optional) Y-m-d, defaults to today (server-local)
+     *   - shift_type (optional) pagi|siang|malam — falls back to time-based
+     *                guess only if absent (deprecated; pass it explicitly)
+     *
+     * Response: manager, supervisor (CNSD-preferred), supervisor_cnsd,
+     * supervisor_tfp, personnel list, has_supervisor flag, shift times,
+     * roster_available flag.
      */
     public function shiftToday(Request $request): JsonResponse
     {
         $date = $request->input('date', Carbon::now()->toDateString());
         $shiftType = $request->input('shift_type');
 
-        // Auto-detect shift from current time if not provided
+        // Fallback auto-detect (deprecated path: only used if frontend omits shift_type)
         if (!$shiftType) {
             $hour = (int) Carbon::now()->format('H');
             if ($hour >= 7 && $hour < 13) {
@@ -89,6 +95,8 @@ class PersonnelController extends Controller
             'roster_available' => $context['roster_available'],
             'manager'          => $context['manager'],
             'supervisor'       => $context['supervisor'],
+            'supervisor_cnsd'  => $context['supervisor_cnsd'],
+            'supervisor_tfp'   => $context['supervisor_tfp'],
             'personnel'        => $context['personnel']->values(),
         ], 'Shift context retrieved successfully');
     }

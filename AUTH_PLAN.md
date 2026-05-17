@@ -123,7 +123,7 @@ $this->authorize('update', $workOrder); // Laravel Policy
 ## Security Considerations
 
 1. **Passwords:** Not stored in maintenance DB. Authentication is delegated to rostering.
-2. **Token Storage:** Frontend stores token in `localStorage` (consistent with current implementation).
+2. **Token Storage:** Frontend stores token in `sessionStorage` (bukan localStorage). Key: `auth_token`. Session berakhir saat tab browser ditutup — sesuai dengan delegated auth pattern.
 3. **CORS:** Configure Laravel CORS to allow requests from `localhost:5173` (Vite dev server) and production domain.
 4. **HTTPS:** Enforce in production.
 5. **Rate Limiting:** Apply to auth endpoints (already built into Laravel).

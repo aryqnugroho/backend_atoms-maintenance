@@ -2,10 +2,12 @@
 
 namespace App\Services;
 
+use App\Exceptions\SignerNotAuthorizedException;
 use App\Models\LocalUser;
 use App\Models\WorkOrder\WorkOrder;
 use App\Models\WorkOrder\WorkOrderOutput;
 use App\Models\WorkOrder\WorkOrderPersonnel;
+use App\Services\LocalUserResolver;
 use InvalidArgumentException;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\DB;
@@ -13,6 +15,10 @@ use RuntimeException;
 
 class WorkOrderService
 {
+    public function __construct(
+        protected LocalUserResolver $userResolver
+    ) {}
+
     /**
      * List work orders with filtering, sorting, and pagination.
      * Teknisi users only see their own assigned WOs.
@@ -62,6 +68,11 @@ class WorkOrderService
             });
         }
 
+        // Year filter — extract year from shift_date
+        if (!empty($filters['year'])) {
+            $query->whereYear('shift_date', (int) $filters['year']);
+        }
+
         // Sorting
         $sortBy = $filters['sort_by'] ?? 'created_at';
         $sortDir = $filters['sort_dir'] ?? 'desc';
@@ -97,17 +108,28 @@ class WorkOrderService
     public function createWorkOrder(array $data, LocalUser $creator): WorkOrder
     {
         return DB::transaction(function () use ($data, $creator) {
-            // ── Auto-resolve shift personnel from rostering (if roster is published) ──
-            // When manager_id or supervisor_id are not provided in the request,
-            // attempt to resolve them from atoms-rostering's published roster.
-            // This replaces the manual selection requirement when a roster exists.
+            // ── Step 1: translate every user-id field in the *incoming* payload
+            //           from rostering_user_id to local_users.id. Frontend always
+            //           sends rostering ids; backend stores local_users.id.
+            $data = $this->mapPayloadRosteringIdsToLocal($data);
+
+            // ── Step 2: auto-fill manager/supervisor from rostering when omitted.
+            //           This step writes local_users.id directly (uses the resolver
+            //           internally), so it must run AFTER the payload translation
+            //           so the two passes don't double-map.
             $data = $this->resolveShiftPersonnelFromRostering($data);
+
+            // ── Step 3: for shift WOs, auto-fill personnel from rostering when
+            //           the frontend didn't send any (e.g., division CNSD on a
+            //           shift where the user couldn't see the personnel list).
+            //           Backend remains the source of truth for shift personnel.
+            $data = $this->autoFillShiftPersonnelFromRostering($data);
 
             // Generate WO number
             $woNumber = $this->generateWoNumber($data['division']);
 
             // Snapshot manager and supervisor names
-            $manager = LocalUser::find($data['manager_id']);
+            $manager = !empty($data['manager_id']) ? LocalUser::find($data['manager_id']) : null;
             $supervisor = !empty($data['supervisor_id']) ? LocalUser::find($data['supervisor_id']) : null;
             $hasSupervisor = array_key_exists('has_supervisor', $data)
                 ? (bool) $data['has_supervisor']
@@ -123,7 +145,7 @@ class WorkOrderService
                 'shift_id' => $data['shift_id'] ?? null,
                 'description' => $data['description'],
                 'status' => 'ongoing',
-                'manager_id' => $data['manager_id'],
+                'manager_id' => $data['manager_id'] ?? null,
                 'supervisor_id' => $hasSupervisor ? ($data['supervisor_id'] ?? null) : null,
                 'assigned_technician_id' => $selectedTechnician?->id,
                 'has_supervisor' => $hasSupervisor,
@@ -166,6 +188,130 @@ class WorkOrderService
 
             return $workOrder;
         });
+    }
+
+    /**
+     * Auto-fill personnel array for shift WOs when the frontend didn't send any.
+     *
+     * For `wo_type = 'shift'`, the personnel list is *deterministic* given a
+     * shift_date + shift_type + division (= all CNS or all Support technicians
+     * working that shift). We treat the rostering DB as the source of truth and
+     * recover gracefully when the frontend omitted the array.
+     *
+     * For `wo_type = 'personal'` we don't synthesize anything — that path
+     * requires the user to explicitly select a single technician.
+     */
+    private function autoFillShiftPersonnelFromRostering(array $data): array
+    {
+        if (($data['wo_type'] ?? null) !== 'shift') {
+            return $data;
+        }
+        if (!empty($data['personnel'])) {
+            return $data;
+        }
+        if (empty($data['shift_type']) || empty($data['shift_date']) || empty($data['division'])) {
+            return $data;
+        }
+
+        try {
+            $rosteringService = app(\App\Services\RosteringIntegrationService::class);
+            $shiftPersonnel = $rosteringService->getShiftPersonnel($data['shift_type'], $data['shift_date']);
+
+            $employeeType = $data['division'] === 'CNSD' ? 'CNS' : 'Support';
+            $filtered = $shiftPersonnel->filter(fn ($p) => $p->employee_type === $employeeType)->values();
+
+            if ($filtered->isEmpty()) {
+                return $data;
+            }
+
+            $personnel = [];
+            foreach ($filtered as $i => $p) {
+                $local = $this->userResolver->ensureLocalUser((int) $p->user_id);
+                if ($local) {
+                    $personnel[] = [
+                        'user_id'    => $local->id,
+                        'role_label' => 'Teknisi ' . ($i + 1),
+                    ];
+                }
+            }
+
+            if (!empty($personnel)) {
+                $data['personnel'] = $personnel;
+            }
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::info(
+                'WorkOrderService: shift personnel auto-fill skipped',
+                ['error' => $e->getMessage()]
+            );
+        }
+
+        return $data;
+    }
+
+    /**
+     * Translate every user-id field in the payload from rostering_user_id to
+     * local_users.id, creating local_users rows on-the-fly via LocalUserResolver.
+     *
+     * Affected fields: manager_id, supervisor_id, assigned_technician_id,
+     * personnel[].user_id.
+     *
+     * The frontend identifies people by their source-of-truth rostering_user_id
+     * (the IDs returned by GET /api/v1/personnel/shift-today). Maintenance stores
+     * foreign keys against local_users.id, so we map at the boundary.
+     */
+    private function mapPayloadRosteringIdsToLocal(array $data): array
+    {
+        // Collect all rostering_user_ids referenced in the payload
+        $allIds = [];
+        foreach (['manager_id', 'supervisor_id', 'assigned_technician_id'] as $field) {
+            if (!empty($data[$field])) {
+                $allIds[] = (int) $data[$field];
+            }
+        }
+        if (!empty($data['personnel']) && is_array($data['personnel'])) {
+            foreach ($data['personnel'] as $person) {
+                if (!empty($person['user_id'])) {
+                    $allIds[] = (int) $person['user_id'];
+                }
+            }
+        }
+
+        if (empty($allIds)) {
+            return $data;
+        }
+
+        $map = $this->userResolver->resolveLocalIds($allIds);
+
+        // Translate each scalar id field — fall back to the original value if the
+        // ID was already a local_users.id (e.g. the SSO-cached creator).
+        foreach (['manager_id', 'supervisor_id', 'assigned_technician_id'] as $field) {
+            if (!empty($data[$field])) {
+                $rid = (int) $data[$field];
+                if (isset($map[$rid])) {
+                    $data[$field] = $map[$rid];
+                } elseif (!LocalUser::whereKey($rid)->exists()) {
+                    // Unresolvable — drop to avoid FK violation
+                    $data[$field] = null;
+                }
+            }
+        }
+
+        if (!empty($data['personnel']) && is_array($data['personnel'])) {
+            $data['personnel'] = array_values(array_filter(array_map(function ($person) use ($map) {
+                $rid = (int) ($person['user_id'] ?? 0);
+                if (!$rid) return null;
+                if (isset($map[$rid])) {
+                    $person['user_id'] = $map[$rid];
+                    return $person;
+                }
+                if (LocalUser::whereKey($rid)->exists()) {
+                    return $person; // already a local id
+                }
+                return null;
+            }, $data['personnel'])));
+        }
+
+        return $data;
     }
 
     /**
@@ -263,16 +409,24 @@ class WorkOrderService
 
     /**
      * Generate a sequential work order number.
-     * Format: WO-{DIV}-{DD}-{MM}-{YYYY}-{SEQ}
+     *
+     * Format: WO-{DIVISI}-{YYYYMMDD}-{SEQ}
+     * Example: WO-CNSD-20260516-001
+     *
+     * This format is sortable (YYYYMMDD sorts chronologically as a string),
+     * compact, and consistent with ISO date conventions.
+     *
+     * Data existing dengan format lama (WO-{DIV}-{DD}-{MM}-{YYYY}-{SEQ})
+     * tetap dapat ditampilkan dan dicari — search di backend menggunakan ILIKE
+     * sehingga kedua format bisa ditemukan.
      */
     public function generateWoNumber(string $division): string
     {
         $today = now();
-        $dateStr = $today->format('d-m-Y');
-        $prefix = 'WO-' . $division . '-' . $dateStr;
+        $dateStr = $today->format('Ymd');      // e.g. 20260516
+        $prefix  = 'WO-' . $division . '-' . $dateStr;
         $likePrefix = $prefix . '%';
 
-        // Count existing WOs for this division and date
         $count = WorkOrder::withTrashed()
             ->where('wo_number', 'LIKE', $likePrefix)
             ->count();
@@ -309,47 +463,49 @@ class WorkOrderService
             $rosteringService = app(\App\Services\RosteringIntegrationService::class);
             $shiftType = $data['shift_type'];
             $shiftDate = $data['shift_date'];
+            $division  = $data['division'] ?? null;
 
             // ── Auto-resolve Manager Teknik ──────────────────────────────────────
             if (empty($data['manager_id'])) {
                 $rosteringManager = $rosteringService->getShiftManager($shiftType, $shiftDate);
                 if ($rosteringManager) {
-                    $localManager = LocalUser::where('rostering_user_id', $rosteringManager->user_id)
-                        ->where('is_active', true)
-                        ->first();
-                    if ($localManager) {
+                    $localManager = $this->userResolver->ensureLocalUser((int) $rosteringManager->user_id);
+                    if ($localManager && $localManager->is_active) {
                         $data['manager_id'] = $localManager->id;
                     }
                 }
             }
 
-            // ── Auto-resolve Supervisor ──────────────────────────────────────────
-            // Only resolve if has_supervisor is not explicitly set to false
+            // ── Auto-resolve Supervisor (per-division) ───────────────────────────
             $supervisorExplicitlyDisabled = array_key_exists('has_supervisor', $data)
                 && $data['has_supervisor'] === false;
 
             if (!$supervisorExplicitlyDisabled && empty($data['supervisor_id'])) {
-                $rosteringSupervisor = $rosteringService->getShiftSupervisor($shiftType, $shiftDate);
+                // Pick supervisor matching the WO's division when known.
+                $rosteringSupervisor = null;
+                if ($division === 'CNSD') {
+                    $rosteringSupervisor = $rosteringService->getShiftSupervisorByDivision($shiftType, $shiftDate, 'CNS');
+                } elseif ($division === 'TFP') {
+                    $rosteringSupervisor = $rosteringService->getShiftSupervisorByDivision($shiftType, $shiftDate, 'Support');
+                } else {
+                    $rosteringSupervisor = $rosteringService->getShiftSupervisor($shiftType, $shiftDate);
+                }
+
                 if ($rosteringSupervisor) {
-                    $localSupervisor = LocalUser::where('rostering_user_id', $rosteringSupervisor->user_id)
-                        ->where('is_active', true)
-                        ->first();
-                    if ($localSupervisor) {
+                    $localSupervisor = $this->userResolver->ensureLocalUser((int) $rosteringSupervisor->user_id);
+                    if ($localSupervisor && $localSupervisor->is_active) {
                         $data['supervisor_id'] = $localSupervisor->id;
-                        // Only set has_supervisor if not already explicitly provided
                         if (!array_key_exists('has_supervisor', $data)) {
                             $data['has_supervisor'] = true;
                         }
                     }
                 } else {
-                    // No supervisor-level CNS in this shift — mark has_supervisor false
                     if (!array_key_exists('has_supervisor', $data)) {
                         $data['has_supervisor'] = false;
                     }
                 }
             }
         } catch (\Exception $e) {
-            // Rostering unavailable — proceed with original data, no auto-resolve
             \Illuminate\Support\Facades\Log::info(
                 'WorkOrderService: rostering auto-resolve skipped (rostering unavailable)',
                 ['error' => $e->getMessage()]
@@ -370,10 +526,25 @@ class WorkOrderService
             ->unique()
             ->values();
 
-        $technicians = LocalUser::whereIn('id', $technicianIds)
-            ->whereIn('role', ['Teknisi CNSD', 'Teknisi TFP'])
-            ->orderBy('id')
-            ->get();
+        // Pick from technician/supervisor roles in division (supervisor still does
+        // technical work). If none of the listed users have an explicit "Teknisi"
+        // role yet (lazy-created from rostering with grade-based role), fall back
+        // to any active user in the personnel list.
+        $division = $data['division'] ?? null;
+        $teknisiRole = $division === 'CNSD' ? 'Teknisi CNSD' : ($division === 'TFP' ? 'Teknisi TFP' : null);
+
+        $query = LocalUser::whereIn('id', $technicianIds)
+            ->where('is_active', true)
+            ->orderBy('id');
+
+        $technicians = $teknisiRole
+            ? (clone $query)->where('role', $teknisiRole)->get()
+            : collect();
+
+        if ($technicians->isEmpty()) {
+            // Fallback: any active user listed as personnel
+            $technicians = $query->get();
+        }
 
         if ($technicians->isEmpty()) {
             return null;
@@ -394,22 +565,113 @@ class WorkOrderService
         return $technicians[$selectedIndex];
     }
 
+    /**
+     * Authorize a signer for a given role.
+     *
+     * Authorization is name-based, not just role-based: the authenticated user's
+     * `name` must match the cached signer name on the Work Order (mt_name /
+     * supervisor_name / technician_name) using a tolerant comparison
+     * (trim + collapse spaces + case-insensitive).
+     *
+     * Falls back to role-only check ONLY if the cached signer name is missing
+     * (e.g. legacy WO without snapshot) — in that case the user must at least
+     * hold the matching role.
+     *
+     * @throws RuntimeException when the user is not allowed to sign for this role
+     */
     private function assertSignerCanSignRole(WorkOrder $workOrder, string $role, LocalUser $signer): void
     {
-        $allowed = match ($role) {
-            'mt' => $signer->isManager(),
-            'supervisor' => $signer->isSupervisor() && (
-                !$workOrder->supervisor_id || $workOrder->supervisor_id === $signer->id
-            ),
-            'technician' => $signer->isTeknisi() && (
-                !$workOrder->assigned_technician_id || $workOrder->assigned_technician_id === $signer->id
-            ),
-            default => false,
+        // Pre-flight: the signer must hold the matching role at minimum.
+        $hasMatchingRole = match ($role) {
+            'mt'         => $signer->isManager(),
+            'supervisor' => $signer->isSupervisor(),
+            'technician' => $signer->isTeknisi(),
+            default      => false,
         };
 
-        if (!$allowed) {
-            throw new RuntimeException('Authenticated user is not allowed to sign for this role.');
+        if (!$hasMatchingRole) {
+            throw new SignerNotAuthorizedException(
+                'Hanya user dengan role yang sesuai yang boleh menandatangani Work Order ini.'
+            );
         }
+
+        // Name-based authorization: the authenticated user must match the
+        // person whose name was cached on the WO at creation.
+        $expectedName = match ($role) {
+            'mt'         => $workOrder->mt_name ?: $workOrder->manager_name_snapshot,
+            'supervisor' => $workOrder->supervisor_name ?: $workOrder->supervisor_name_snapshot,
+            'technician' => $workOrder->technician_name,
+            default      => null,
+        };
+
+        if (!$expectedName) {
+            // No cached signer name — fall back to ID-based matching where possible.
+            $idMatchOk = match ($role) {
+                'mt'         => $workOrder->manager_id === null || $workOrder->manager_id === $signer->id,
+                'supervisor' => $workOrder->supervisor_id === null || $workOrder->supervisor_id === $signer->id,
+                'technician' => $workOrder->assigned_technician_id === null
+                                || $workOrder->assigned_technician_id === $signer->id
+                                || $workOrder->personnel()->where('user_id', $signer->id)->exists(),
+                default      => false,
+            };
+
+            if (!$idMatchOk) {
+                throw new SignerNotAuthorizedException(
+                    'Tanda tangan hanya dapat dilakukan oleh penanda tangan yang berwenang.'
+                );
+            }
+            return;
+        }
+
+        if (!$this->namesMatch($expectedName, $signer->name)) {
+            throw new SignerNotAuthorizedException(sprintf(
+                'Tanda tangan hanya dapat dilakukan oleh %s. Tidak boleh diwakilkan.',
+                $expectedName
+            ));
+        }
+
+        // Extra guard: when the WO has explicit IDs, also enforce ID equality so
+        // a homonym cannot sign on behalf of a different person with the same name.
+        if ($role === 'supervisor' && $workOrder->supervisor_id && $workOrder->supervisor_id !== $signer->id) {
+            throw new SignerNotAuthorizedException(sprintf(
+                'Tanda tangan hanya dapat dilakukan oleh %s. Tidak boleh diwakilkan.',
+                $expectedName
+            ));
+        }
+
+        if ($role === 'technician' && $workOrder->assigned_technician_id && $workOrder->assigned_technician_id !== $signer->id) {
+            // For shift WOs, also accept any user listed in personnel
+            $isInPersonnel = $workOrder->personnel()->where('user_id', $signer->id)->exists();
+            if (!$isInPersonnel) {
+                throw new SignerNotAuthorizedException(sprintf(
+                    'Tanda tangan hanya dapat dilakukan oleh %s. Tidak boleh diwakilkan.',
+                    $expectedName
+                ));
+            }
+        }
+
+        if ($role === 'mt' && $workOrder->manager_id && $workOrder->manager_id !== $signer->id) {
+            throw new SignerNotAuthorizedException(sprintf(
+                'Tanda tangan hanya dapat dilakukan oleh %s. Tidak boleh diwakilkan.',
+                $expectedName
+            ));
+        }
+    }
+
+    /**
+     * Tolerant name comparison: trim, collapse interior whitespace, case-insensitive.
+     */
+    public static function namesMatch(?string $a, ?string $b): bool
+    {
+        $normalize = static function (?string $s): string {
+            $s = (string) $s;
+            $s = trim($s);
+            $s = preg_replace('/\s+/u', ' ', $s) ?? '';
+            return mb_strtolower($s, 'UTF-8');
+        };
+        $na = $normalize($a);
+        $nb = $normalize($b);
+        return $na !== '' && $na === $nb;
     }
 
     /**

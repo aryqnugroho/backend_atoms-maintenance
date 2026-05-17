@@ -48,19 +48,25 @@ Key types:
 
 ---
 
-## Frontend Auth Flow
+## Frontend Auth Flow (✅ SSO Implemented 2026-05-15)
 
-1. `AuthContext` manages user, token, and isAuthenticated state.
-2. Token stored in `localStorage` as `auth_token`.
-3. User stored in `localStorage` as `user` (JSON).
-4. `authService.ts` calls `POST /auth/login` with email/password.
-5. Response expected: `{ access_token, token_type, user }`.
-6. `updateUser()` method allows injecting mock users without API call.
+1. `AuthContext` manages user, token, dan isAuthenticated state.
+2. Token stored in `sessionStorage` sebagai `auth_token` (bukan localStorage).
+3. `authService.ts` memiliki method `verify()` untuk validasi token via backend proxy.
+4. Response expected dari `/api/v1/auth/verify`: `{ success, data: { user } }`.
+5. `updateUser()` method untuk inject mock users tanpa API call.
+
+### SSO Flow (Production)
+- atoms-rostering frontend redirect ke `http://localhost:5173?token={token}`
+- `AuthContext.initAuth()` baca token dari URL → hapus dari URL → panggil `GET /api/v1/auth/verify`
+- Jika valid: simpan di sessionStorage, set user di context
+- Jika invalid: redirect ke `VITE_ROSTERING_FRONTEND_URL`
 
 ### Mock Auth (Dev)
-- When `VITE_DEV_MOCK_AUTH=true`, frontend skips real login API.
-- Injects mock user + `mock-token-{user_id}` into AuthContext.
-- All API calls include `Authorization: Bearer mock-token-{user_id}`.
+- Ketika `VITE_DEV_MOCK_AUTH=true`, frontend skip real SSO flow.
+- Login via mock form di `/login` dengan email apapun.
+- Inject mock user + `mock-token-{user_id}` ke AuthContext.
+- Semua API call include `Authorization: Bearer mock-token-{user_id}`.
 
 ---
 

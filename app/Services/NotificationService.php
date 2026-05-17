@@ -2,8 +2,11 @@
 
 namespace App\Services;
 
+use App\Models\Cnsd\CnsdReadinessRecord;
 use App\Models\LocalUser;
 use App\Models\WorkOrder\WorkOrder;
+use App\Notifications\CnsdReadinessCompletedNotification;
+use App\Notifications\CnsdReadinessCreatedNotification;
 use App\Notifications\WorkOrderCreatedNotification;
 use App\Notifications\WorkOrderStatusChangedNotification;
 
@@ -39,6 +42,105 @@ class NotificationService
             }
         }
     }
+
+    // ─── CNSD Readiness Notifications ─────────────────────────
+
+    /**
+     * Notify relevant users when a CNSD readiness record is created.
+     *
+     * Notifies:
+     *   - Manager Teknik (if cached and different from creator)
+     *   - Supervisor CNSD (if cached and different from creator)
+     *   - All assigned technicians (if they have a local_users entry)
+     */
+    public function notifyReadinessCreated(CnsdReadinessRecord $record): void
+    {
+        $notifiedIds = [];
+
+        // Exclude the creator from notifications
+        if ($record->created_by_id) {
+            $notifiedIds[] = $record->created_by_id;
+        }
+
+        // Notify Manager Teknik
+        if ($record->manager_id && !in_array($record->manager_id, $notifiedIds)) {
+            $manager = LocalUser::find($record->manager_id);
+            if ($manager) {
+                $manager->notify(new CnsdReadinessCreatedNotification($record));
+                $notifiedIds[] = $record->manager_id;
+            }
+        }
+
+        // Notify Supervisor CNSD
+        if ($record->supervisor_id && !in_array($record->supervisor_id, $notifiedIds)) {
+            $supervisor = LocalUser::find($record->supervisor_id);
+            if ($supervisor) {
+                $supervisor->notify(new CnsdReadinessCreatedNotification($record));
+                $notifiedIds[] = $record->supervisor_id;
+            }
+        }
+
+        // Notify all assigned technicians
+        $record->loadMissing('technicians');
+        foreach ($record->technicians as $techRow) {
+            if (!$techRow->technician_id || in_array($techRow->technician_id, $notifiedIds)) {
+                continue;
+            }
+            $technician = LocalUser::find($techRow->technician_id);
+            if ($technician) {
+                $technician->notify(new CnsdReadinessCreatedNotification($record));
+                $notifiedIds[] = $techRow->technician_id;
+            }
+        }
+    }
+
+    /**
+     * Notify relevant users when a CNSD readiness record is completed.
+     *
+     * Notifies the same set as create, except the signer who caused completion.
+     */
+    public function notifyReadinessCompleted(CnsdReadinessRecord $record, LocalUser $completedBy): void
+    {
+        $notifiedIds = [$completedBy->id];
+
+        if ($record->created_by_id && !in_array($record->created_by_id, $notifiedIds)) {
+            $creator = LocalUser::find($record->created_by_id);
+            if ($creator) {
+                $creator->notify(new CnsdReadinessCompletedNotification($record, $completedBy));
+                $notifiedIds[] = $record->created_by_id;
+            }
+        }
+
+        if ($record->manager_id && !in_array($record->manager_id, $notifiedIds)) {
+            $manager = LocalUser::find($record->manager_id);
+            if ($manager) {
+                $manager->notify(new CnsdReadinessCompletedNotification($record, $completedBy));
+                $notifiedIds[] = $record->manager_id;
+            }
+        }
+
+        if ($record->supervisor_id && !in_array($record->supervisor_id, $notifiedIds)) {
+            $supervisor = LocalUser::find($record->supervisor_id);
+            if ($supervisor) {
+                $supervisor->notify(new CnsdReadinessCompletedNotification($record, $completedBy));
+                $notifiedIds[] = $record->supervisor_id;
+            }
+        }
+
+        $record->loadMissing('technicians');
+        foreach ($record->technicians as $techRow) {
+            if (!$techRow->technician_id || in_array($techRow->technician_id, $notifiedIds)) {
+                continue;
+            }
+            $technician = LocalUser::find($techRow->technician_id);
+            if ($technician) {
+                $technician->notify(new CnsdReadinessCompletedNotification($record, $completedBy));
+                $notifiedIds[] = $techRow->technician_id;
+            }
+        }
+    }
+
+    // ─── Work Order Notifications ──────────────────────────────
 
     /**
      * Notify relevant users when a work order status changes.

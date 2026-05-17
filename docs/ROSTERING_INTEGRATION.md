@@ -1,7 +1,7 @@
 # ROSTERING_INTEGRATION.md — atoms-maintenance
 
 > Integration guide for connecting atoms-maintenance to atoms-rostering.
-> Generated: 2026-05-14 | Status: atoms-rostering confirmed running on port 8001.
+> Generated: 2026-05-14 | Last updated: 2026-05-15 — SSO integration implemented.
 > ⚠️ atoms-rostering is READ-ONLY from maintenance's perspective. Never write to its DB.
 
 ---
@@ -436,11 +436,16 @@ public function isShiftEnded(string $shiftName, string $workDate): bool
 ## Section 5 — Local Development Setup
 
 ### Port Assignments
-| Service | Port | URL |
-|---------|------|-----|
-| atoms-rostering backend | 8001 | `http://localhost:8001` |
-| atoms-maintenance backend | 8000 | `http://localhost:8000` |
-| atoms-maintenance frontend | 5173 | `http://localhost:5173` |
+| Service | Port | URL | Notes |
+|---------|------|-----|-------|
+| atoms-rostering backend | 8001 | `http://localhost:8001` | Auth source of truth |
+| atoms-maintenance backend | 8000 | `http://localhost:8000` | |
+| atoms-maintenance frontend | 5173 | `http://localhost:5173` | Vite default — SSO redirect target |
+| atoms-rostering frontend | 5174 | `http://localhost:5174` | Run with: `npm run dev -- --port 5174` |
+
+> **Port conflict note:** Both Vite projects default to port 5173. atoms-rostering frontend
+> must be started explicitly on port 5174 to avoid conflict when both run simultaneously.
+> atoms-maintenance stays on 5173 as it is the SSO redirect target.
 
 ### Startup Order
 1. **Start atoms-rostering backend first** (it's the auth source of truth):
@@ -455,7 +460,13 @@ public function isShiftEnded(string $shiftName, string $workDate): bool
    php artisan serve --port=8000
    ```
 
-3. **Start atoms-maintenance frontend:**
+3. **Start atoms-rostering frontend on port 5174** (must be explicit to avoid conflict):
+   ```bash
+   cd atoms-rostering/frontend_atoms
+   npm run dev -- --port 5174
+   ```
+
+4. **Start atoms-maintenance frontend** (stays on default port 5173):
    ```bash
    cd atoms-maintenance/frontend_atoms-maintenance
    npm run dev
@@ -550,3 +561,117 @@ Tables in `atoms_rostering` that atoms-maintenance reads:
 **`shift_assignments.notes` values:**
 - Working: `P` (pagi), `S` (siang), `M` (malam)
 - Non-working: `L` (libur), `CT` (cuti tahunan), `CS` (cuti sakit), `DL` (dinas luar), `TB` (tugas belajar), `OFF`
+
+---
+
+## Section 7 — SSO Integration (Implemented 2026-05-15)
+
+### Status: ✅ Implemented
+
+### Approach: Option 2 — Token Proxy via API Call
+
+atoms-maintenance validates Sanctum tokens by calling atoms-rostering's own
+`GET /api/auth/me` endpoint. No shared database coupling, no JWT secret required.
+
+### Token Passing Mechanism
+
+```
+atoms-rostering frontend (port 5174)
+  → User clicks Maintenance button
+  → MenuGrid.tsx reads token from sessionStorage
+  → window.location.href = 'http://localhost:5173?token={sanctum_token}'
+
+atoms-maintenance frontend (port 5173)
+  → AuthContext.initAuth() reads ?token from URL
+  → Removes token from URL (history.replaceState)
+  → Calls GET /api/v1/auth/verify with token as Bearer header
+  → Backend proxies to GET http://localhost:8001/api/auth/me
+  → If valid: stores token in sessionStorage, sets user in context
+  → If invalid: redirects to http://localhost:5174/login
+```
+
+### URL Format for Redirect
+
+```
+http://localhost:5173?token={url_encoded_sanctum_token}
+```
+
+The token is URL-encoded via `encodeURIComponent()` to handle the `|` character
+in Sanctum token format (`{id}|{random_string}`).
+
+### Middleware That Handles Verification
+
+| Middleware | File | When Used |
+|-----------|------|-----------|
+| `MockAuthMiddleware` | `app/Http/Middleware/MockAuthMiddleware.php` | All protected routes (handles both mock and prod paths) |
+| `VerifyRosteringToken` | `app/Http/Middleware/VerifyRosteringToken.php` | Available as `rostering.auth` alias for explicit use |
+| `RosteringAuthService` | `app/Services/RosteringAuthService.php` | Called by both middleware — wraps the HTTP call to rostering |
+
+**Route alias:** `mockauth` (unchanged) — now delegates to rostering proxy when `DEV_MOCK_AUTH=false`.
+
+### Token Payload Fields (from rostering /api/auth/me)
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | int | rostering user ID (= `local_users.rostering_user_id`) |
+| `name` | string | Full name |
+| `email` | string | Email address |
+| `role` | string | Rostering role: `Admin`, `Cns`, `Support`, `Manager Teknik`, `General Manager` |
+| `grade` | int\|null | Employee grade (13+ = supervisor level for CNS) |
+| `is_active` | bool | Account active flag |
+| `employee.id` | int | Employee record ID |
+| `employee.employee_type` | string | `CNS`, `Support`, `Manager Teknik`, `Administrator` |
+| `employee.group_number` | int\|null | Group/division number |
+| `employee.is_fixed_manager` | bool | Fixed manager flag |
+
+### Role Mapping (Rostering → Maintenance)
+
+| Rostering Role | Maintenance Role | Notes |
+|---------------|-----------------|-------|
+| `Admin` | `Admin` | Direct map |
+| `Manager Teknik` | `Manager Teknik` | Direct map |
+| `General Manager` | `Manager Teknik` | Closest equivalent |
+| `Cns` | `Teknisi CNSD` | Supervisor upgrade via grade check (grade ≥ 13) |
+| `Support` | `Teknisi TFP` | Supervisor upgrade via grade check (grade ≥ 13) |
+
+### Token Storage
+
+- **atoms-rostering frontend:** `sessionStorage['auth_token']` (via `authStorage.ts`)
+- **atoms-maintenance frontend:** `sessionStorage['auth_token']` (never localStorage)
+- Session ends when browser tab is closed — correct for delegated auth
+
+### Known Limitations
+
+1. **No token refresh:** Sanctum tokens in atoms-rostering have no expiry set. If a token is
+   revoked at rostering (logout), atoms-maintenance will return 401 on the next request.
+   The frontend will then redirect to rostering login.
+
+2. **atoms-rostering must be running:** If rostering backend is down, atoms-maintenance
+   returns 401 for all requests. `RosteringAuthService` logs a warning and fails closed.
+
+3. **Mock dev mode:** When `DEV_MOCK_AUTH=true` and `VITE_DEV_MOCK_AUTH=true`, the SSO
+   flow is bypassed. Use mock-token-{id} pattern with local_users table.
+
+4. **Supervisor role distinction:** `Cns` employees with `grade >= 13` are supervisors in
+   maintenance context. The role mapping in `RosteringAuthService::mapRole()` currently
+   maps all `Cns` to `Teknisi CNSD`. Supervisor upgrade logic should be added when
+   CNSD supervisor-specific routes are implemented.
+
+### Files Modified/Created for SSO
+
+| File | Change |
+|------|--------|
+| `app/Services/RosteringAuthService.php` | NEW — HTTP proxy to rostering /api/auth/me |
+| `app/Http/Middleware/VerifyRosteringToken.php` | NEW — standalone middleware (alias: `rostering.auth`) |
+| `app/Http/Middleware/MockAuthMiddleware.php` | MODIFIED — now handles both mock and prod paths |
+| `app/Http/Controllers/Api/V1/AuthController.php` | MODIFIED — added `verify()` public endpoint |
+| `routes/api.php` | MODIFIED — added `GET /api/v1/auth/verify` (public) |
+| `bootstrap/app.php` | MODIFIED — added `rostering.auth` alias |
+| `.env` / `.env.example` | MODIFIED — added `ROSTERING_FRONTEND_URL`, port comments |
+| `frontend/.env` | MODIFIED — added `VITE_ROSTERING_FRONTEND_URL=http://localhost:5174` |
+| `frontend/src/contexts/AuthContext.tsx` | MODIFIED — full SSO token-from-URL flow |
+| `frontend/src/components/layout/ProtectedRoute.tsx` | MODIFIED — production redirect to rostering |
+| `frontend/src/pages/auth/LoginPage.tsx` | MODIFIED — production redirect, mock form preserved |
+| `frontend/src/services/authService.ts` | MODIFIED — added `verify()`, fixed sessionStorage |
+| `frontend/src/services/workOrderService.ts` | MODIFIED — fixed localStorage → sessionStorage |
+| `atoms-rostering/frontend_atoms/src/components/feature/home/MenuGrid.tsx` | MODIFIED — Maintenance button SSO redirect |

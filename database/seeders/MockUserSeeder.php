@@ -5,13 +5,28 @@ namespace Database\Seeders;
 use App\Models\LocalUser;
 use Illuminate\Database\Seeder;
 
+/**
+ * @deprecated 2026-05-16
+ *
+ * This seeder produces STALE local_users rows whose `rostering_user_id` does
+ * NOT match the live atoms-rostering data (mis. local Moch. Ichsan claims
+ * rostering_user_id=2 but the real ID is 9). Running it will create incorrect
+ * mappings.
+ *
+ * The seeder is retained only as a historical reference. Use these instead:
+ *
+ *   - SSO login (auto-upsert via RosteringAuthService::buildTransientUser)
+ *   - Work Order create (LocalUserResolver lazy-creates referenced users)
+ *   - `php artisan local-users:sync` (bulk pull from rostering)
+ *
+ * NOT registered in DatabaseSeeder. If invoked manually, prints a warning.
+ */
 class MockUserSeeder extends Seeder
 {
-    /**
-     * Run the database seeds.
-     */
     public function run(): void
     {
+        $this->command?->warn('MockUserSeeder is deprecated. Use `php artisan local-users:sync` instead.');
+
         $mockUsers = [
             [
                 'rostering_user_id' => 1,

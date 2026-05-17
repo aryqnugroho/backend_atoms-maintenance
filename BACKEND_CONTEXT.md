@@ -12,24 +12,24 @@ The ATOMS-Maintenance backend is a **standalone Laravel API** that powers the ma
 
 ### atoms-rostering (Source of Truth)
 - **Owns:** User accounts, login/authentication, employee records, shift definitions, roster schedules, leave requests, shift swaps.
-- **Tech:** Laravel 12 + SQLite (dev) / PostgreSQL (prod), Sanctum auth.
-- **Status:** Production-ready, actively maintained.
+- **Tech:** Laravel + PostgreSQL (`atoms_rostering`), Sanctum auth.
+- **Status:** Production-ready, actively maintained. Running on port 8001 (local dev).
 
 ### atoms-maintenance (This Project)
 - **Owns:** Work Orders, CNSD inspections (EQ-1), TFP performance checks (AOB Ground), Ground Check, Grounding inspections, Maintenance Reports, Logbooks, Dashboard aggregation.
 - **Tech:** PHP 8.x (Laravel) + PostgreSQL.
 - **Status:** Phase 3 Scaffolded (Work Orders). Phase 4 Prepared (CNSD). Laravel base installed, `local_users` seeded, MockAuth active. **Successfully integrated and tested with `frontend_atoms-maintenance`**. Frontend UI has been updated to use standardized Work Order statuses (`completed`, `on_hold`, `ongoing`) and features a Print PDF layout. Backend development should align with these UI expectations. Ready to build features.
 
-### Integration Points (Future)
+### Integration Points
 | Data | Source | How Maintenance Accesses It |
 |------|--------|-----------------------------|
-| User login & tokens | atoms-rostering | SSO / shared Sanctum token validation |
-| Employee profiles | atoms-rostering | API call or shared read-only DB view |
+| User login & tokens | atoms-rostering | ✅ SSO via token proxy — `GET http://localhost:8001/api/auth/me` |
+| Employee profiles | atoms-rostering | ✅ Via `local_users` cache (manual seed; real sync pending) |
 | Current shift & personnel | atoms-rostering | ✅ `GET /api/v1/personnel/shift-today` → `RosteringIntegrationService` |
 | Shift definitions (pagi/siang/malam) | atoms-rostering | ✅ Read via `rostering` DB connection |
-| Work Orders | atoms-maintenance | Local DB (owned) |
-| Inspections (CNSD/TFP) | atoms-maintenance | Local DB (owned) |
-| Reports & Logbooks | atoms-maintenance | Local DB (owned) |
+| Work Orders | atoms-maintenance | ✅ Local DB (owned) — Complete & Verified |
+| Inspections (CNSD/TFP) | atoms-maintenance | ⬜ Local DB (owned) — Phase 4+ |
+| Reports & Logbooks | atoms-maintenance | ⬜ Local DB (owned) — Phase 5+ |
 
 ---
 
@@ -187,5 +187,164 @@ This table is the maintenance-side cache for authenticated users and signer refe
 
 - ~~A named read-only rostering DB connection is not configured yet.~~ **RESOLVED (2026-05-15):** Koneksi `rostering` sudah dikonfigurasi di `config/database.php` dan env vars `ROSTERING_DB_*` sudah ditambahkan. `RosteringIntegrationService` sudah dibuat di `app/Services/RosteringIntegrationService.php`. Endpoint `GET /api/v1/personnel/shift-today` sudah tersedia.
 - ~~Work Order `isShiftEnded()` di model `WorkOrder` masih menggunakan hardcoded fallback times.~~ **RESOLVED (2026-05-15):** `WorkOrder::isShiftEnded()` sekarang menggunakan `RosteringIntegrationService::isShiftEnded()` dengan fallback ke hardcoded jika rostering tidak tersedia. `WorkOrderService::createWorkOrder()` sekarang auto-resolve MT dan supervisor dari rostering jika roster dipublish.
-- CNSD is scaffold-only. TFP, Ground Check, Grounding, Logbook, and Reporting backend modules are not yet implemented.
-- Future modules must reuse `HasSignature` instead of creating module-specific signature logic.
+- ~~CNSD is scaffold-only.~~ **RESOLVED (2026-05-17):** Form EQ-1 (Kesiapan Peralatan CNSD) shipped sebagai pilot. Schema, service, controller, dan routes lengkap. Lihat `cnsd-readiness-rules.md` di `.agents/instructions/`.
+- TFP, Ground Check, Grounding, Logbook, dan Reporting backend modules belum diimplementasi.
+- CNSD print backend belum dibuat — print direncanakan frontend-only.
+- Future modules harus reuse `HasSignature` trait, bukan signature logic per-modul baru.
+
+---
+
+## Work Order List — Filter API
+
+**Endpoint:** `GET /api/v1/work-orders`
+
+Semua parameter opsional. Filter kosong/tidak dikirim diabaikan.
+
+| Parameter | Tipe | Deskripsi |
+|---|---|---|
+| `search` | string | ILIKE match pada `wo_number` dan `description` |
+| `shift_date` | `YYYY-MM-DD` | Cocok persis dengan `shift_date` |
+| `year` | string 4-digit | `EXTRACT(YEAR FROM shift_date)` |
+| `division` | `CNSD` atau `TFP` | Cocok persis |
+| `shift_type` | `pagi`, `siang`, `malam` | Cocok persis |
+| `status` | `ongoing`, `on_hold`, `completed` | Cocok persis |
+| `wo_type` | `shift`, `personal` | Cocok persis |
+| `sort_by` | string | Kolom sortir |
+| `sort_dir` | `asc`, `desc` | Arah sortir |
+| `per_page` | int (max 100) | Jumlah per halaman, default 15 |
+
+**Endpoint tambahan:** `GET /api/v1/work-orders/years`
+
+Mengembalikan array tahun tersedia dari `shift_date`, descending. Selalu menyertakan tahun berjalan. Dipakai oleh dropdown tahun di frontend.
+
+## Work Order Nomor Format
+
+Format: `WO-{DIVISI}-{YYYYMMDD}-{SEQ}`
+Contoh: `WO-CNSD-20260516-001`, `WO-TFP-20260516-001`
+
+- Format lama (`WO-{DIV}-{DD}-{MM}-{YYYY}-{SEQ}`) tetap bisa ditampilkan dan dicari — search di backend memakai ILIKE.
+- Nomor urut (3 digit, zero-padded) reset per tanggal + divisi.
+- Format baru sortable secara string tanpa konversi.
+
+## Work Order List UI
+
+- Search bar + 5 filter (tanggal, tahun, divisi, shift, status) dalam filter bar satu card.
+- Debounce search 350ms supaya tidak membombardir API saat ketik.
+- **Active filter chips**: tiap filter aktif muncul sebagai chip biru yang bisa di-close satu per satu.
+- **Reset Filter** tombol muncul di sebelah search bar saat ada filter aktif. Reset menghapus semua filter sekaligus.
+- **Result count** ditampilkan di kanan bawah filter bar.
+- **Empty state DB kosong**: ikon + pesan "Belum ada Work Order" + tombol Buat Work Order.
+- **Empty state filter**: ikon + pesan "Tidak ada Work Order yang sesuai filter" + link Reset.
+- Responsif: grid 2 kolom di mobile, 5 kolom di desktop.
+- Fetch ulang setiap kali filter berubah; create/edit modal onClose juga fetch ulang (filter tetap aktif).
+
+## Database Default — Empty by Design
+
+`DatabaseSeeder::run()` kosong. `MockUserSeeder` dan `WorkOrderSeeder` deprecated, tidak dipanggil. Setelah `migrate:fresh --seed`: 0 work_orders, 0 local_users.
+
+Semua endpoint yang membaca personel dari rostering wajib menerima **date + shift_type** secara eksplisit dari client.
+
+`GET /api/v1/personnel/shift-today?date=YYYY-MM-DD&shift_type=pagi|siang|malam`
+
+Backend timezone = `UTC`. Auto-detect "shift sekarang" via `Carbon::now()` di backend salah untuk operasional WIB. Frontend mengirim shift hasil hitung dari client clock.
+
+Response:
+- `manager` (object|null) — Manager Teknik untuk date+shift tersebut. Diquery dari `shift_assignments` dengan `employees.employee_type = 'Manager Teknik'`. (Tabel `manager_duties` di rostering belum dipakai / kosong.)
+- `supervisor` (object|null) — alias backward-compat: CNSD diutamakan, fallback TFP.
+- `supervisor_cnsd` (object|null) — CNS dengan `grade >= 13` pada shift ini.
+- `supervisor_tfp` (object|null) — Support dengan `grade >= 13` pada shift ini.
+- `personnel` (Collection) — semua CNS + Support yang bertugas pada date+shift tersebut. **Tidak termasuk MT** (filter `employee_type IN ('CNS','Support')`).
+- `has_supervisor` (bool), `roster_available` (bool), `shift_times` (object|null).
+
+`RosteringIntegrationService` punya:
+- `getShiftManager($shift, $date)` — query shift_assignments untuk MT (employee_type='Manager Teknik').
+- `getShiftSupervisorByDivision($shift, $date, 'CNS' | 'Support')`.
+- `getShiftSupervisor($shift, $date)` — convenience yang prefer CNSD lalu fallback TFP.
+- `getShiftPersonnel($shift, $date)` — semua CNS + Support (tidak termasuk MT).
+- `getShiftContext($shift, $date)` — agregat lengkap untuk endpoint `shift-today`.
+
+## User Identifier Mapping
+
+Frontend selalu mengirim **rostering_user_id** (sumber kebenaran) untuk semua field user di payload Work Order create. Backend menerjemahkannya ke **local_users.id** sebelum simpan, lewat `App\Services\LocalUserResolver`.
+
+Resolver behavior:
+- Cari row `local_users` dengan `rostering_user_id` cocok. Jika ada, return.
+- Jika tidak ada, query rostering DB read-only untuk users + employees, lalu `LocalUser::updateOrCreate()` dengan role + division yang dipetakan otomatis.
+- Aman dipanggil berkali-kali (idempotent).
+
+`WorkOrderService::mapPayloadRosteringIdsToLocal()` memanggil resolver untuk: `manager_id`, `supervisor_id`, `assigned_technician_id`, `personnel[].user_id`. Mapping dijalankan **sebelum** auto-resolve dari roster, supaya tidak terjadi double-translation.
+
+FormRequest `WorkOrderCreateRequest` **tidak** memakai rule `exists:local_users,id` di field user-id karena resolver akan create on-the-fly. `personnel` array juga `sometimes` (tidak required) — backend `autoFillShiftPersonnelFromRostering()` mengisi otomatis dari rostering shift personnel saat array kosong dan `wo_type='shift'`.
+
+## Database Default — Empty by Design
+
+`DatabaseSeeder::run()` sengaja kosong. `migrate:fresh --seed` menghasilkan **0 work_orders, 0 local_users**. Pengisian terjadi via:
+
+1. **SSO login** — `RosteringAuthService::buildTransientUser()` upsert ke `local_users` setiap kali user login.
+2. **Work Order create** — `LocalUserResolver::ensureLocalUser()` lazy-create personnel yang direferensikan.
+3. **`php artisan local-users:sync`** — bulk pull semua active users dari rostering. Mendukung `--dry-run` (preview) dan `--prune-stale` (deactivate users yang sudah tidak ada di rostering).
+4. **`php artisan local-users:cleanup`** — deteksi dan hapus duplikat `local_users` yang `rostering_user_id`-nya tidak cocok dengan rostering live. Aman: tidak menghapus row yang punya FK references (work_orders, signatures, personnel).
+
+`MockUserSeeder` dan `WorkOrderSeeder` **deprecated** dan **tidak dipanggil** dari `DatabaseSeeder`. Jika dipanggil manual via `db:seed --class=...`, mereka mengeluarkan warning. Jangan kembalikan ke pipeline default.
+
+## Signature Authorization
+
+Sign endpoint `POST /api/v1/work-orders/{id}/sign` enforce nama+role:
+- `WorkOrderService::assertSignerCanSignRole()` cek role (LocalUser->isManager / isSupervisor / isTeknisi).
+- Lalu cek nama: `namesMatch($workOrder->{role}_name, $signer->name)` dengan tolerant compare (trim + collapse whitespace + case-insensitive).
+- Untuk technician di shift WO, fallback diperbolehkan: nama signer cocok dengan salah satu nama di `personnel[]`.
+- Jika nama / role tidak cocok → throw `App\Exceptions\SignerNotAuthorizedException` → controller map ke HTTP 403.
+- Re-sign signature yang sudah ada → throw `RuntimeException` → 409 (immutable rule).
+
+
+## CNSD Equipment Readiness — Form EQ-1 (Phase 4 pilot)
+
+Status: ✅ Live (2026-05-17)
+
+### Tabel
+- `cnsd_readiness_records` — header per form. Unique partial index per
+  (form_type, facility, date, shift_type) ignoring soft-deleted rows.
+- `cnsd_readiness_technicians` — snapshot teknisi CNSD per record. Per-row
+  immutable signature.
+- `cnsd_readiness_items` — item form di-generate dari template EQ-1 di
+  `app/Services/Cnsd/CnsdEq1Template.php` (5 section, 36 item baseline).
+
+### Endpoints (semua di bawah `/api/v1/cnsd/readiness`)
+
+| Method | URI | Roles |
+|---|---|---|
+| GET    | `/` | semua authenticated |
+| GET    | `/years` | semua authenticated |
+| GET    | `/template` | semua authenticated |
+| POST   | `/` | Admin / Manager Teknik / Supervisor CNSD / Teknisi CNSD |
+| GET    | `/{id}` | semua authenticated |
+| PUT    | `/{id}` | semua authenticated (hanya update item values) |
+| POST   | `/{id}/sign` | sesuai role + nama signer match |
+| DELETE | `/{id}` | Admin / Manager Teknik |
+
+### Signature Authorization
+
+`CnsdReadinessService::signRecord()` mengikuti pola Work Order:
+- Role check (`Manager Teknik` / `Supervisor CNSD` / `Teknisi CNSD`).
+- Nama signer harus cocok dengan `manager_name` / `supervisor_name` /
+  `cnsd_readiness_technicians.technician_name` (tolerant compare via
+  `WorkOrderService::namesMatch()`).
+- Untuk teknisi, optional `technician_row_id` di payload mengarah ke row spesifik.
+  Backend juga bisa resolve via `signer.id` atau name match.
+- Signature **immutable**, **tidak boleh diwakilkan**.
+
+### Format Form Number
+
+`{FORM_TYPE}-{FACILITY}-YYYYMMDD-SEQ`
+Contoh: `EQ-1-CNSD-20260517-001`
+
+### Roster Personnel
+
+`CnsdReadinessService::resolveRosterContext()`:
+- Manager Teknik dari `getShiftManager(date, shift)`.
+- Supervisor CNSD dari `getShiftSupervisorByDivision(date, shift, 'CNS')`.
+- Teknisi CNSD dari `getShiftPersonnel(date, shift)` filter `employee_type = 'CNS'`.
+- Personel TFP/Support tidak diikutkan ke EQ-1.
+- Jika tidak ada teknisi CNSD di shift → create return **422** dengan pesan jelas.
+- Manager / supervisor nullable — jika tidak ada di roster, kolom tetap null
+  dan tanda tangan untuk role tersebut tidak diwajibkan.
