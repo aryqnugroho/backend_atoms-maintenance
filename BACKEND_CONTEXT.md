@@ -348,3 +348,105 @@ Contoh: `EQ-1-CNSD-20260517-001`
 - Jika tidak ada teknisi CNSD di shift → create return **422** dengan pesan jelas.
 - Manager / supervisor nullable — jika tidak ada di roster, kolom tetap null
   dan tanda tangan untuk role tersebut tidak diwajibkan.
+
+
+## CNSD Readiness — Phase 4.1 Update (2026-05-17)
+
+Print view, notifications, and signer badge added. See session-handoff for details.
+
+- **Print:** Frontend-only (`CnsdReadinessPrintView.tsx`), route `/cnsd/readiness/:id/print`.
+- **Notifications:** `CnsdReadinessCreatedNotification` + `CnsdReadinessCompletedNotification`.
+  `NotificationService::notifyReadinessCreated()` / `notifyReadinessCompleted()` added.
+  Both fire via `database` channel (in-app bell).
+- **Signer badge:** Client-side name match in `CnsdReadinessListPage`, badge "Perlu TTD".
+- **Commits:**
+  - Backend: `fde9929` (main) — `feat(cnsd): add EQ-1 readiness module with notifications, print support, and signer status`
+  - Frontend: `83d1758` (main) — `feat(cnsd): add EQ-1 print view, signer badge, and CNSD readiness module`
+
+
+## CNSD Radar Meter Reading — Phase 4 Module 2 (2026-05-18)
+
+Status: ✅ Live (second CNSD module after EQ-1).
+
+### Tabel
+- `cnsd_radar_meter_records` — header, satu record per (form_type, facility, date, shift_type).
+  Field Radar-spesifik: `merk` (default `ELDIS`), `type` (default `MSSR-1 / RL2000`), `serial_number`.
+- `cnsd_radar_meter_technicians` — snapshot teknisi CNSD per record. Per-row immutable signature.
+- `cnsd_radar_meter_items` — item form di-generate dari template (48 items: section A + C).
+
+### Endpoints (semua di bawah `/api/v1/cnsd/radar-meter`)
+
+| Method | URI | Roles |
+|---|---|---|
+| GET    | `/` | semua authenticated |
+| GET    | `/years` | semua authenticated |
+| GET    | `/template` | semua authenticated |
+| POST   | `/` | Admin / MT / Sup CNSD / Teknisi CNSD |
+| GET    | `/{id}` | semua authenticated |
+| PUT    | `/{id}` | semua authenticated (hanya update item values) |
+| POST   | `/{id}/sign` | sesuai role + nama signer match |
+| DELETE | `/{id}` | Admin / MT |
+
+### Signature Authorization
+Identik dengan EQ-1: name-match, immutable, no delegation. Implementasi di
+`CnsdRadarMeterService::signRecord()`.
+
+### Format Form Number
+`RADAR-YYMMDD-SEQ`
+Contoh: `RADAR-260518-001`
+
+### Roster Personnel
+Sama dengan EQ-1: hanya `employee_type = 'CNS'`. Tidak ambil TFP. Jika tidak ada
+teknisi CNSD pada shift → 422.
+
+### EQ-1 Tetap Berjalan
+Modul Radar hidup di tabel & namespace terpisah (`cnsd_radar_meter_*` vs
+`cnsd_readiness_*`). Tidak ada perubahan ke EQ-1; kedua modul independen.
+
+
+## CNSD Recorder Meter Reading — Phase 4 Module 3 (2026-05-19)
+
+Status: ✅ Live (third CNSD module after EQ-1 and Radar).
+
+### Tabel
+- `cnsd_recorder_meter_records` — header, satu record per (form_type, facility, date, shift_type).
+  Field Recorder-spesifik: `form_code` (default `FORM C-3`), `merk` (default `ATIS - UHER`),
+  `type` (default `VC - MDx`), `serial_number` (default `51`).
+- `cnsd_recorder_meter_technicians` — snapshot teknisi CNSD per record. Per-row immutable signature.
+- `cnsd_recorder_meter_items` — item form di-generate dari template (72 items: section A 69 + section B 3,
+  termasuk 15 U/S blocked).
+
+### Endpoints (semua di bawah `/api/v1/cnsd/recorder-meter`)
+
+| Method | URI | Roles |
+|---|---|---|
+| GET    | `/` | semua authenticated |
+| GET    | `/years` | semua authenticated |
+| GET    | `/template` | semua authenticated |
+| POST   | `/` | Admin / MT / Sup CNSD / Teknisi CNSD |
+| GET    | `/{id}` | semua authenticated |
+| PUT    | `/{id}` | semua authenticated (hanya update item values, blocked items diabaikan) |
+| POST   | `/{id}/sign` | sesuai role + nama signer match |
+| DELETE | `/{id}` | Admin / MT |
+
+### Signature Authorization
+Identik dengan EQ-1 / Radar: name-match, immutable, no delegation. Implementasi di
+`CnsdRecorderMeterService::signRecord()`.
+
+### Format Form Number
+`RECORDER-YYMMDD-SEQ`
+Contoh: `RECORDER-260517-001`
+
+### U/S Item Protection
+- Items dengan `is_blocked = true` (Channel 7, 21–27, 29–35) tidak bisa diisi.
+- `CnsdRecorderMeterService::updateItems()` mengabaikan patch yang menargetkan blocked rows.
+- Frontend menampilkan red strip + label U/S, semua input disabled.
+
+### Roster Personnel
+Sama dengan EQ-1 / Radar: hanya `employee_type = 'CNS'`. Tidak ambil TFP. Jika tidak ada
+teknisi CNSD pada shift → 422.
+
+### EQ-1 dan Radar Tetap Berjalan
+Modul Recorder hidup di tabel & namespace terpisah (`cnsd_recorder_meter_*` vs
+`cnsd_radar_meter_*` vs `cnsd_readiness_*`). Tidak ada perubahan ke modul lain;
+ketiga modul independen.

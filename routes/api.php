@@ -6,6 +6,8 @@ use App\Http\Controllers\Api\V1\PersonnelController;
 use App\Http\Controllers\Api\V1\NotificationController;
 use App\Http\Controllers\Api\V1\WorkOrder\WorkOrderController;
 use App\Http\Controllers\Api\V1\Cnsd\CnsdReadinessController;
+use App\Http\Controllers\Api\V1\Cnsd\CnsdRadarMeterController;
+use App\Http\Controllers\Api\V1\Cnsd\CnsdRecorderMeterController;
 
 Route::prefix('v1')->group(function () {
     // ─── Public Auth Routes ────────────────────────────────────────────────
@@ -57,6 +59,47 @@ Route::prefix('v1')->group(function () {
             Route::put('/{id}',     [CnsdReadinessController::class, 'update'])->whereNumber('id');
             Route::post('/{id}/sign', [CnsdReadinessController::class, 'sign'])->whereNumber('id');
             Route::delete('/{id}', [CnsdReadinessController::class, 'destroy'])
+                ->whereNumber('id')
+                ->middleware('role:Admin,Manager Teknik');
+        });
+
+        // ─── CNSD Radar Meter Reading (Form RADAR-METER) ───────
+        // Second CNSD module — "Meter Reading Radar".
+        Route::prefix('cnsd/radar-meter')->group(function () {
+            // Template + year filter must be declared BEFORE the {id} route so
+            // /template and /years aren't captured by the int parameter.
+            Route::get('/template', [CnsdRadarMeterController::class, 'template']);
+            Route::get('/years',    [CnsdRadarMeterController::class, 'years']);
+
+            Route::get('/',         [CnsdRadarMeterController::class, 'index']);
+            Route::post('/', [CnsdRadarMeterController::class, 'store'])
+                ->middleware('role:Admin,Manager Teknik,Supervisor CNSD,Teknisi CNSD');
+
+            Route::get('/{id}',     [CnsdRadarMeterController::class, 'show'])->whereNumber('id');
+            Route::put('/{id}',     [CnsdRadarMeterController::class, 'update'])->whereNumber('id');
+            Route::post('/{id}/sign', [CnsdRadarMeterController::class, 'sign'])->whereNumber('id');
+            Route::delete('/{id}', [CnsdRadarMeterController::class, 'destroy'])
+                ->whereNumber('id')
+                ->middleware('role:Admin,Manager Teknik');
+        });
+
+        // ─── CNSD Recorder Meter Reading (Form RECORDER-METER / FORM C-3) ───
+        // Third CNSD module — "Meter Reading Recorder". Other CNSD equipment
+        // cards (AMSC, Transmitter, ...) remain Coming Soon and have no backend.
+        Route::prefix('cnsd/recorder-meter')->group(function () {
+            // Template + year filter must be declared BEFORE the {id} route so
+            // /template and /years aren't captured by the int parameter.
+            Route::get('/template', [CnsdRecorderMeterController::class, 'template']);
+            Route::get('/years',    [CnsdRecorderMeterController::class, 'years']);
+
+            Route::get('/',         [CnsdRecorderMeterController::class, 'index']);
+            Route::post('/', [CnsdRecorderMeterController::class, 'store'])
+                ->middleware('role:Admin,Manager Teknik,Supervisor CNSD,Teknisi CNSD');
+
+            Route::get('/{id}',     [CnsdRecorderMeterController::class, 'show'])->whereNumber('id');
+            Route::put('/{id}',     [CnsdRecorderMeterController::class, 'update'])->whereNumber('id');
+            Route::post('/{id}/sign', [CnsdRecorderMeterController::class, 'sign'])->whereNumber('id');
+            Route::delete('/{id}', [CnsdRecorderMeterController::class, 'destroy'])
                 ->whereNumber('id')
                 ->middleware('role:Admin,Manager Teknik');
         });
