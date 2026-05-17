@@ -8,6 +8,7 @@ use App\Http\Controllers\Api\V1\WorkOrder\WorkOrderController;
 use App\Http\Controllers\Api\V1\Cnsd\CnsdReadinessController;
 use App\Http\Controllers\Api\V1\Cnsd\CnsdRadarMeterController;
 use App\Http\Controllers\Api\V1\Cnsd\CnsdRecorderMeterController;
+use App\Http\Controllers\Api\V1\Tfp\TfpAobGroundController;
 
 Route::prefix('v1')->group(function () {
     // ─── Public Auth Routes ────────────────────────────────────────────────
@@ -100,6 +101,21 @@ Route::prefix('v1')->group(function () {
             Route::put('/{id}',     [CnsdRecorderMeterController::class, 'update'])->whereNumber('id');
             Route::post('/{id}/sign', [CnsdRecorderMeterController::class, 'sign'])->whereNumber('id');
             Route::delete('/{id}', [CnsdRecorderMeterController::class, 'destroy'])
+                ->whereNumber('id')
+                ->middleware('role:Admin,Manager Teknik');
+        });
+
+        // ─── TFP Performance Check AOB Lantai Ground ───────────
+        Route::prefix('tfp/aob-ground')->group(function () {
+            Route::get('/template', [TfpAobGroundController::class, 'template']);
+            Route::get('/years',    [TfpAobGroundController::class, 'years']);
+            Route::get('/',         [TfpAobGroundController::class, 'index']);
+            Route::post('/', [TfpAobGroundController::class, 'store'])
+                ->middleware('role:Admin,Manager Teknik,Supervisor TFP,Teknisi TFP');
+            Route::get('/{id}',     [TfpAobGroundController::class, 'show'])->whereNumber('id');
+            Route::put('/{id}',     [TfpAobGroundController::class, 'update'])->whereNumber('id');
+            Route::post('/{id}/sign', [TfpAobGroundController::class, 'sign'])->whereNumber('id');
+            Route::delete('/{id}', [TfpAobGroundController::class, 'destroy'])
                 ->whereNumber('id')
                 ->middleware('role:Admin,Manager Teknik');
         });

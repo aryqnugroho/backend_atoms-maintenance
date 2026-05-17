@@ -404,6 +404,81 @@ Modul Radar hidup di tabel & namespace terpisah (`cnsd_radar_meter_*` vs
 `cnsd_readiness_*`). Tidak ada perubahan ke EQ-1; kedua modul independen.
 
 
+## TFP Performance Check AOB Lantai Ground — Phase 5 Module 1 (2026-05-19)
+
+Status: ✅ Live (first TFP module).
+
+### Tabel
+- `tfp_aob_ground_records` — header, satu record per (form_type, date, shift_type).
+  Field TFP-spesifik: `day_name` (hari otomatis dari date), `time_filled` (jam saat create HH:MM).
+- `tfp_aob_ground_technicians` — snapshot teknisi TFP per record. Per-row immutable signature.
+- `tfp_aob_ground_items` — 21 parameter form di-generate dari template.
+  Kolom: `panel_cos_a03_input/output`, `panel_ats_a12_input/output`, `ups_tescom_a_input/output`, `ups_tescom_b_input/output`, `is_disabled_map` (jsonb).
+- `tfp_aob_ground_facilities` — 17 fasilitas di-generate dari template.
+  Kolom: `facility_name`, `kondisi` (Baik/Normal/Tidak Baik), `keterangan`.
+
+### Endpoints (semua di bawah `/api/v1/tfp/aob-ground`)
+
+| Method | URI | Roles |
+|---|---|---|
+| GET    | `/` | semua authenticated |
+| GET    | `/years` | semua authenticated |
+| GET    | `/template` | semua authenticated |
+| POST   | `/` | Admin / MT / Sup TFP / Teknisi TFP |
+| GET    | `/{id}` | semua authenticated |
+| PUT    | `/{id}` | semua authenticated (update items + facilities) |
+| POST   | `/{id}/sign` | sesuai role + nama signer match |
+| DELETE | `/{id}` | Admin / MT |
+
+### Signature Authorization
+Identik dengan CNSD: name-match, immutable, no delegation. Implementasi di
+`TfpAobGroundService::signRecord()`. Supervisor check: `isSupervisorTfp() || isSupervisor()`.
+
+### Format Form Number
+`TFP-AOBLTGND-YYMMDD-SEQ`
+Contoh: `TFP-AOBLTGND-260519-001`
+
+### Roster Personnel
+`employee_type = 'Support'` (bukan 'CNS'). Supervisor TFP: `getShiftSupervisorByDivision(..., 'Support')`.
+Jika tidak ada teknisi TFP pada shift → 422.
+
+### Template
+21 parameter (L1-N, L2-N, L3-N, N-G, L1-L2, L1-L3, L2-L3, L1, L2, L3, N, Frekuensi,
+Power Factor, Tegangan Battery, Arus Battery, Kapasitas Battery, Suhu Battery, Mode, Suplai Aktif,
+KWH Meter, Suhu Eq. Room). Row "Suhu Ruang ARO" TIDAK ADA (dihapus per permintaan).
+17 fasilitas (Catu Daya Listrik, Penerangan, UPS Tescom A/B, AC 01-08, Papan Nama AirNav,
+Atap, Plafond, Dinding, Pintu, Door Lock).
+
+### Disabled Cell Enforcement (2026-05-19 refinement)
+Backend `updateItems()` membaca `is_disabled_map` per item row dan strip kolom yang
+`true` dari payload sebelum `fill()`. Hasil: bahkan jika klien mem-bypass UI dan mengirim
+patch ke disabled cell (mis. `panel_cos_a03_input` untuk row Battery), backend tidak akan
+menulis ke kolom itu. `is_disabled_map` adalah single source of truth dan di-set saat
+record dibuat dari template — tidak boleh diubah lewat update endpoint.
+
+### Time Filled Refresh on Update (2026-05-19 bugfix)
+`time_filled` (HH:MM) di-refresh setiap kali user Simpan Perubahan via `updateItems()`
+atau `updateFacilities()`. Implementasi: di akhir transaction sebelum return fresh,
+`$record->time_filled = now()->format('H:i'); $record->save();`. Setiap save = snapshot
+waktu baru. Tanggal dan hari (`date`, `day_name`) TIDAK di-refresh — tetap dari record
+header. Cocok dengan paper form yang mencatat "jam saat petugas mengambil reading".
+
+### Disabled Cell Rules
+- Rows 1-12 (voltage/current/frequency): semua 8 kolom enabled
+- Row 13 (Power Factor): UPS TESCOM A/B disabled
+- Rows 14-17 (Battery): Panel COS A03 + Panel ATS A12 disabled
+- Rows 18-19 (Mode, Suplai Aktif): UPS TESCOM A/B disabled
+- Rows 20-21 (KWH Meter, Suhu Eq. Room): single value di panel_cos_a03_input, rest disabled
+
+### Dropdown Rules
+- Mode: Auto / Manual (Panel COS dan ATS)
+- Suplai Aktif: PLN / UPS (Panel COS), PLN 1 / PLN 2 (Panel ATS)
+- Kondisi fasilitas: Baik / Normal / Tidak Baik
+
+### CNSD Tetap Berjalan
+Modul TFP hidup di tabel & namespace terpisah (`tfp_aob_ground_*`). Tidak ada perubahan ke CNSD.
+
+
 ## CNSD Recorder Meter Reading — Phase 4 Module 3 (2026-05-19)
 
 Status: ✅ Live (third CNSD module after EQ-1 and Radar).
