@@ -29,6 +29,8 @@ class CnsdAmscMeterRecord extends Model
         'facility',
         'date',
         'shift_type',
+        'day_name',
+        'time_filled',
         'location',
         'merk',
         'type',

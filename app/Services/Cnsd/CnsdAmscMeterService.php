@@ -125,12 +125,18 @@ class CnsdAmscMeterService
             $manager    = $rosterContext['manager'];
             $supervisor = $rosterContext['supervisor'];
 
+            // Auto-fill day name (Indonesian) and time (WIB HH:MM)
+            $dayNames = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
+            $dayName  = $dayNames[(int) now()->format('w')];
+
             $record = CnsdAmscMeterRecord::create([
                 'form_number'     => $this->generateFormNumber($formType, $facility, $date),
                 'form_type'       => $formType,
                 'facility'        => $facility,
                 'date'            => $date,
                 'shift_type'      => $shiftType,
+                'day_name'        => $dayName,
+                'time_filled'     => now()->format('H:i'),
                 'location'        => $location,
                 'merk'            => $merk,
                 'type'            => $type,
@@ -266,6 +272,10 @@ class CnsdAmscMeterService
                 }
                 $item->save();
             }
+
+            // Refresh time_filled on every save (mirrors TFP AOB Ground pattern)
+            $record->time_filled = now()->format('H:i');
+            $record->save();
 
             $record->refresh();
             return $record->load(['technicians', 'items', 'manager:id,name', 'supervisor:id,name']);
