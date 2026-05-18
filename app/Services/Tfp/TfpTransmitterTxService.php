@@ -1,0 +1,285 @@
+<?php
+
+namespace App\Services\Tfp;
+
+use App\Exceptions\SignerNotAuthorizedException;
+use App\Exceptions\TfpTransmitterTxDuplicateException;
+use App\Models\LocalUser;
+use App\Models\Tfp\TfpTransmitterTxFacility;
+use App\Models\Tfp\TfpTransmitterTxItem;
+use App\Models\Tfp\TfpTransmitterTxRecord;
+use App\Models\Tfp\TfpTransmitterTxTechnician;
+use App\Services\LocalUserResolver;
+use App\Services\RosteringIntegrationService;
+use App\Services\WorkOrderService;
+use Carbon\Carbon;
+use Illuminate\Contracts\Pagination\LengthAwarePaginator;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+use InvalidArgumentException;
+use RuntimeException;
+
+class TfpTransmitterTxService
+{
+    public function __construct(
+        protected LocalUserResolver $userResolver,
+        protected RosteringIntegrationService $rosteringService,
+    ) {}
+
+    // ─── Read ──────────────────────────────────────────────────
+
+    public function listRecords(array $filters, int $perPage = 15): LengthAwarePaginator
+    {
+        $query = TfpTransmitterTxRecord::query()
+            ->with(['technicians:id,tx_record_id,technician_id,technician_name,technician_signature,sort_order', 'manager:id,name', 'supervisor:id,name'])
+            ->withCount('technicians');
+
+        $query->byFormType($filters['form_type'] ?? 'TX');
+
+        if (!empty($filters['date']))       $query->byDate($filters['date']);
+        if (!empty($filters['year']))       $query->whereYear('date', (int) $filters['year']);
+        if (!empty($filters['shift_type'])) $query->byShift($filters['shift_type']);
+        if (!empty($filters['status']))     $query->where('status', $filters['status']);
+
+        if (!empty($filters['search'])) {
+            $needle = '%' . $filters['search'] . '%';
+            $query->where(fn ($q) => $q->where('form_number', 'ILIKE', $needle)
+                ->orWhere('manager_name', 'ILIKE', $needle)
+                ->orWhere('supervisor_name', 'ILIKE', $needle));
+        }
+
+        $sortBy  = in_array($filters['sort_by'] ?? 'date', ['date', 'created_at', 'shift_type', 'status'], true) ? ($filters['sort_by'] ?? 'date') : 'date';
+        $sortDir = ($filters['sort_dir'] ?? 'desc') === 'asc' ? 'asc' : 'desc';
+
+        return $query->orderBy($sortBy, $sortDir)->orderByDesc('id')->paginate($perPage);
+    }
+
+    public function findRecord(int $id): ?TfpTransmitterTxRecord
+    {
+        return TfpTransmitterTxRecord::query()
+            ->with(['technicians', 'items', 'facilities', 'manager:id,name', 'supervisor:id,name', 'creator:id,name'])
+            ->find($id);
+    }
+
+    public function findExistingRecord(string $formType, string $date, string $shiftType): ?TfpTransmitterTxRecord
+    {
+        return TfpTransmitterTxRecord::query()
+            ->where('form_type', $formType)->whereDate('date', $date)->where('shift_type', $shiftType)
+            ->first();
+    }
+
+    // ─── Create ────────────────────────────────────────────────
+
+    public function createRecord(array $data, ?LocalUser $creator = null): TfpTransmitterTxRecord
+    {
+        $formType  = $data['form_type']  ?? 'TX';
+        $date      = $data['date'];
+        $shiftType = $data['shift_type'];
+        $location  = $data['location']   ?? 'GEDUNG TRANSMITTER';
+
+        $existing = $this->findExistingRecord($formType, $date, $shiftType);
+        if ($existing) throw new TfpTransmitterTxDuplicateException($existing);
+
+        $rosterContext = $this->resolveRosterContext($shiftType, $date);
+
+        if (empty($rosterContext['technicians'])) {
+            throw new RuntimeException(
+                'Tidak ada teknisi TFP yang bertugas pada tanggal ' . $date . ' shift ' . $shiftType
+                . '. Pastikan roster sudah dipublish dan terdapat personel Support untuk shift ini.'
+            );
+        }
+
+        return DB::transaction(function () use ($formType, $date, $shiftType, $location, $creator, $rosterContext) {
+            $manager    = $rosterContext['manager'];
+            $supervisor = $rosterContext['supervisor'];
+
+            $carbonDate = Carbon::parse($date);
+            $dayNames   = ['Sunday' => 'Minggu', 'Monday' => 'Senin', 'Tuesday' => 'Selasa', 'Wednesday' => 'Rabu', 'Thursday' => 'Kamis', 'Friday' => 'Jumat', 'Saturday' => 'Sabtu'];
+            $dayName    = $dayNames[$carbonDate->format('l')] ?? $carbonDate->format('l');
+
+            $record = TfpTransmitterTxRecord::create([
+                'form_number'     => $this->generateFormNumber($date),
+                'form_type'       => $formType,
+                'date'            => $date,
+                'day_name'        => $dayName,
+                'time_filled'     => now()->format('H:i'),
+                'shift_type'      => $shiftType,
+                'location'        => $location,
+                'status'          => 'ongoing',
+                'manager_id'      => $manager?->id,
+                'manager_name'    => $manager?->name,
+                'supervisor_id'   => $supervisor?->id,
+                'supervisor_name' => $supervisor?->name,
+                'created_by_id'   => $creator?->id,
+                'created_by_name' => $creator?->name,
+            ]);
+
+            $sort = 0;
+            foreach ($rosterContext['technicians'] as $tech) {
+                TfpTransmitterTxTechnician::create([
+                    'tx_record_id'   => $record->id,
+                    'technician_id'  => $tech['local_id'],
+                    'technician_name'=> $tech['name'],
+                    'sort_order'     => $sort++,
+                ]);
+            }
+
+            $itemRows = TfpTransmitterTxTemplate::buildItemRows($record->id);
+            if (!empty($itemRows)) TfpTransmitterTxItem::insert($itemRows);
+
+            $facilityRows = TfpTransmitterTxTemplate::buildFacilityRows($record->id);
+            if (!empty($facilityRows)) TfpTransmitterTxFacility::insert($facilityRows);
+
+            $record->refresh();
+            return $record->load(['technicians', 'items', 'facilities', 'manager:id,name', 'supervisor:id,name']);
+        });
+    }
+
+    private function resolveRosterContext(string $shiftType, string $date): array
+    {
+        $manager = $supervisor = null;
+        $technicians = [];
+        try {
+            $rosterManager = $this->rosteringService->getShiftManager($shiftType, $date);
+            if ($rosterManager) $manager = $this->userResolver->ensureLocalUser((int) $rosterManager->user_id);
+
+            $rosterSupervisor = $this->rosteringService->getShiftSupervisorByDivision($shiftType, $date, 'Support');
+            if ($rosterSupervisor) $supervisor = $this->userResolver->ensureLocalUser((int) $rosterSupervisor->user_id);
+
+            $personnel   = $this->rosteringService->getShiftPersonnel($shiftType, $date);
+            $supportOnly = $personnel->filter(fn ($p) => $p->employee_type === 'Support')->values();
+
+            foreach ($supportOnly as $person) {
+                $local = $this->userResolver->ensureLocalUser((int) $person->user_id);
+                $technicians[] = ['local_id' => $local?->id, 'name' => $person->name, 'user_id' => (int) $person->user_id];
+            }
+        } catch (\Throwable $e) {
+            Log::warning('TfpTransmitterTxService: roster lookup failed', ['shift_type' => $shiftType, 'date' => $date, 'error' => $e->getMessage()]);
+        }
+        return ['manager' => $manager, 'supervisor' => $supervisor, 'technicians' => $technicians];
+    }
+
+    public function generateFormNumber(string $date): string
+    {
+        $dateYymmdd = date('ymd', strtotime($date));
+        $prefix = 'TFP-TX-' . $dateYymmdd;
+        $count  = TfpTransmitterTxRecord::withTrashed()->where('form_number', 'LIKE', $prefix . '%')->count();
+        return $prefix . '-' . str_pad($count + 1, 3, '0', STR_PAD_LEFT);
+    }
+
+    // ─── Update ────────────────────────────────────────────────
+
+    public function updateItems(TfpTransmitterTxRecord $record, array $items): TfpTransmitterTxRecord
+    {
+        if ($record->status === 'completed') throw new RuntimeException('Form yang sudah completed tidak dapat diubah lagi.');
+
+        return DB::transaction(function () use ($record, $items) {
+            $existing = $record->items()->get()->keyBy('id');
+            $allowed  = ['panel_tx01', 'panel_tx02', 'panel_cos_tx03_input', 'panel_cos_tx03_output', 'panel_output_ups_tx04', 'panel_ups_tx07_input', 'panel_ups_tx07_output', 'panel_ac_tx06', 'ups_piller_input', 'ups_piller_output', 'panel_milat_ru11'];
+
+            foreach ($items as $payload) {
+                if (empty($payload['id']) || !$existing->has($payload['id'])) continue;
+                $item        = $existing->get($payload['id']);
+                $disabledMap = is_array($item->is_disabled_map) ? $item->is_disabled_map : [];
+                $effective   = array_diff($allowed, array_keys(array_filter($disabledMap, static fn ($v) => $v === true)));
+                $item->fill(array_intersect_key($payload, array_flip($effective)));
+                $item->save();
+            }
+
+            $record->time_filled = now()->format('H:i');
+            $record->save();
+
+            return $record->fresh(['technicians', 'items', 'facilities', 'manager:id,name', 'supervisor:id,name']);
+        });
+    }
+
+    public function updateFacilities(TfpTransmitterTxRecord $record, array $facilities): TfpTransmitterTxRecord
+    {
+        if ($record->status === 'completed') throw new RuntimeException('Form yang sudah completed tidak dapat diubah lagi.');
+
+        return DB::transaction(function () use ($record, $facilities) {
+            $existing = $record->facilities()->get()->keyBy('id');
+            foreach ($facilities as $payload) {
+                if (empty($payload['id']) || !$existing->has($payload['id'])) continue;
+                $facility = $existing->get($payload['id']);
+                $facility->fill(array_intersect_key($payload, array_flip(['kondisi', 'keterangan'])));
+                $facility->save();
+            }
+            $record->time_filled = now()->format('H:i');
+            $record->save();
+            return $record->fresh(['technicians', 'items', 'facilities', 'manager:id,name', 'supervisor:id,name']);
+        });
+    }
+
+    // ─── Sign ──────────────────────────────────────────────────
+
+    public function signRecord(TfpTransmitterTxRecord $record, string $role, string $base64Signature, LocalUser $signer, ?int $technicianRowId = null): TfpTransmitterTxRecord
+    {
+        $role = strtolower(trim($role));
+        if ($record->status === 'completed') throw new RuntimeException('Form yang sudah completed tidak dapat ditandatangani lagi.');
+
+        return DB::transaction(function () use ($record, $role, $base64Signature, $signer, $technicianRowId) {
+            if ($role === 'technician') {
+                $this->signTechnicianRow($record, $base64Signature, $signer, $technicianRowId);
+            } else {
+                $this->signRecordRole($record, $role, $base64Signature, $signer);
+            }
+
+            $record->refresh();
+            $newStatus = $record->isComplete() ? 'completed' : ($record->isShiftEnded() ? 'on_hold' : 'ongoing');
+            if ($record->status !== $newStatus) { $record->status = $newStatus; $record->save(); }
+
+            return $record->fresh(['technicians', 'items', 'facilities', 'manager:id,name', 'supervisor:id,name']);
+        });
+    }
+
+    private function signRecordRole(TfpTransmitterTxRecord $record, string $role, string $base64, LocalUser $signer): void
+    {
+        $expectedName = match ($role) {
+            'manager'    => $record->manager_name,
+            'supervisor' => $record->supervisor_name,
+            default      => null,
+        };
+        if (!$expectedName) throw new SignerNotAuthorizedException('Form ini tidak memiliki ' . ($role === 'manager' ? 'Manager Teknik' : 'Supervisor TFP') . ' yang ditugaskan.');
+
+        $roleOk = match ($role) {
+            'manager'    => $signer->isManager(),
+            'supervisor' => $signer->isSupervisorTfp() || $signer->isSupervisor(),
+            default      => false,
+        };
+        if (!$roleOk) throw new SignerNotAuthorizedException('Hanya ' . ($role === 'manager' ? 'Manager Teknik' : 'Supervisor TFP') . ' yang berhak menandatangani role ini.');
+        if (!WorkOrderService::namesMatch($expectedName, $signer->name)) throw new SignerNotAuthorizedException(sprintf('Tanda tangan hanya dapat dilakukan oleh %s. Tidak boleh diwakilkan.', $expectedName));
+
+        $record->saveSignature($role, $base64, $signer->id);
+    }
+
+    private function signTechnicianRow(TfpTransmitterTxRecord $record, string $base64, LocalUser $signer, ?int $technicianRowId): void
+    {
+        if (!$signer->isTeknisi() && !$signer->isSupervisorTfp()) throw new SignerNotAuthorizedException('Hanya teknisi TFP yang berhak menandatangani role ini.');
+
+        $row = null;
+        if ($technicianRowId) $row = $record->technicians()->where('id', $technicianRowId)->first();
+        if (!$row && $signer->id) $row = $record->technicians()->where('technician_id', $signer->id)->first();
+        if (!$row) $row = $record->technicians()->get()->first(fn ($t) => WorkOrderService::namesMatch($t->technician_name, $signer->name));
+
+        if (!$row) throw new SignerNotAuthorizedException('Anda bukan bagian dari teknisi TFP yang bertugas di shift ini.');
+        if (!WorkOrderService::namesMatch($row->technician_name, $signer->name)) throw new SignerNotAuthorizedException(sprintf('Tanda tangan hanya dapat dilakukan oleh %s. Tidak boleh diwakilkan.', $row->technician_name));
+        if (!empty($row->technician_signature)) throw new RuntimeException('Tanda tangan teknisi sudah tersimpan dan tidak dapat diubah.');
+
+        $this->validateBase64PngSignature($base64);
+        $row->technician_signature = $base64;
+        $row->technician_signed_by = $signer->id;
+        $row->technician_signed_at = now();
+        $row->save();
+    }
+
+    private function validateBase64PngSignature(string $base64): void
+    {
+        $prefix = 'data:image/png;base64,';
+        if (!str_starts_with($base64, $prefix)) throw new InvalidArgumentException('Signature must be a base64 PNG data URL.');
+        $payload = substr($base64, strlen($prefix));
+        if ($payload === '' || base64_decode($payload, true) === false) throw new InvalidArgumentException('Signature payload is not valid base64.');
+    }
+
+    public function deleteRecord(TfpTransmitterTxRecord $record): void { $record->delete(); }
+}
