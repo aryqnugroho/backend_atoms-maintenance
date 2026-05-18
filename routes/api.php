@@ -8,6 +8,7 @@ use App\Http\Controllers\Api\V1\WorkOrder\WorkOrderController;
 use App\Http\Controllers\Api\V1\Cnsd\CnsdReadinessController;
 use App\Http\Controllers\Api\V1\Cnsd\CnsdRadarMeterController;
 use App\Http\Controllers\Api\V1\Cnsd\CnsdRecorderMeterController;
+use App\Http\Controllers\Api\V1\Cnsd\CnsdAmscMeterController;
 use App\Http\Controllers\Api\V1\Tfp\TfpAobGroundController;
 use App\Http\Controllers\Api\V1\Tfp\TfpAobLt12Controller;
 
@@ -102,6 +103,24 @@ Route::prefix('v1')->group(function () {
             Route::put('/{id}',     [CnsdRecorderMeterController::class, 'update'])->whereNumber('id');
             Route::post('/{id}/sign', [CnsdRecorderMeterController::class, 'sign'])->whereNumber('id');
             Route::delete('/{id}', [CnsdRecorderMeterController::class, 'destroy'])
+                ->whereNumber('id')
+                ->middleware('role:Admin,Manager Teknik');
+        });
+
+        // ─── CNSD AMSC Meter Reading (Form AMSC-METER) ───────────
+        // Fourth CNSD module — "Meter Reading AMSC".
+        Route::prefix('cnsd/amsc-meter')->group(function () {
+            Route::get('/template', [CnsdAmscMeterController::class, 'template']);
+            Route::get('/years',    [CnsdAmscMeterController::class, 'years']);
+
+            Route::get('/',         [CnsdAmscMeterController::class, 'index']);
+            Route::post('/', [CnsdAmscMeterController::class, 'store'])
+                ->middleware('role:Admin,Manager Teknik,Supervisor CNSD,Teknisi CNSD');
+
+            Route::get('/{id}',     [CnsdAmscMeterController::class, 'show'])->whereNumber('id');
+            Route::put('/{id}',     [CnsdAmscMeterController::class, 'update'])->whereNumber('id');
+            Route::post('/{id}/sign', [CnsdAmscMeterController::class, 'sign'])->whereNumber('id');
+            Route::delete('/{id}', [CnsdAmscMeterController::class, 'destroy'])
                 ->whereNumber('id')
                 ->middleware('role:Admin,Manager Teknik');
         });

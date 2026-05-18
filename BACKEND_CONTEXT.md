@@ -463,6 +463,11 @@ atau `updateFacilities()`. Implementasi: di akhir transaction sebelum return fre
 waktu baru. Tanggal dan hari (`date`, `day_name`) TIDAK di-refresh — tetap dari record
 header. Cocok dengan paper form yang mencatat "jam saat petugas mengambil reading".
 
+### Timezone Fix (2026-05-19 bugfix)
+`config/app.php` diubah dari `'timezone' => 'UTC'` ke `'timezone' => 'Asia/Jakarta'`.
+Sebelumnya `now()->format('H:i')` menghasilkan UTC time (7 jam lebih awal dari WIB).
+Sekarang menghasilkan WIB time yang benar. Atoms-rostering sudah menggunakan `Asia/Jakarta`.
+
 ### Disabled Cell Rules
 - Rows 1-12 (voltage/current/frequency): semua 8 kolom enabled
 - Row 13 (Power Factor): UPS TESCOM A/B disabled
@@ -525,3 +530,74 @@ teknisi CNSD pada shift → 422.
 Modul Recorder hidup di tabel & namespace terpisah (`cnsd_recorder_meter_*` vs
 `cnsd_radar_meter_*` vs `cnsd_readiness_*`). Tidak ada perubahan ke modul lain;
 ketiga modul independen.
+
+
+## CNSD AMSC Meter Reading — Phase 4 Module 4 (2026-05-19)
+
+Status: ✅ Live (fourth CNSD module after EQ-1, Radar, and Recorder).
+
+### Tabel
+- `cnsd_amsc_meter_records` — header, satu record per (form_type, facility, date, shift_type).
+  Field AMSC-spesifik: `merk` (default `ELSA`), `type` (default `1003Qi+`),
+  `serial_number` (default `-`).
+- `cnsd_amsc_meter_technicians` — snapshot teknisi CNSD per record. Per-row immutable signature.
+- `cnsd_amsc_meter_items` — item form di-generate dari template (45 items: 4 sections).
+  Kolom: `hasil_a`, `hasil_b` (Front Panel dual A/B), `hasil` (PSU + environment),
+  `address`, `status_value`, `cct` (Channel AMSC), `keterangan`.
+
+### Item Template
+Sumber: `app/Services/Cnsd/CnsdAmscMeterTemplate.php`.
+
+| Section | Layout | Items |
+|---|---|---|
+| 1. FRONT PANEL | Dual A/B | 5 items (All Status Indikator, Operation Server, Signal selector, Change Over, Clock Signal) |
+| 2. POWER SUPPLY UNIT | Single HASIL | 5 items (+60V, -60V, +12V, +5V, -12V) |
+| 3. CHANNEL AMSC | ADDRESS/STATUS/CCT | 32 items (Channel 1-32) |
+| 4. LINGKUNGAN KERJA | Single HASIL | 3 items (Suhu, Humidity, Kebersihan) |
+
+Total: **45 items**.
+
+### Endpoints (semua di bawah `/api/v1/cnsd/amsc-meter`)
+
+| Method | URI | Roles |
+|---|---|---|
+| GET    | `/` | semua authenticated |
+| GET    | `/years` | semua authenticated |
+| GET    | `/template` | semua authenticated |
+| POST   | `/` | Admin / MT / Sup CNSD / Teknisi CNSD |
+| GET    | `/{id}` | semua authenticated |
+| PUT    | `/{id}` | semua authenticated (hanya update item values) |
+| POST   | `/{id}/sign` | sesuai role + nama signer match |
+| DELETE | `/{id}` | Admin / MT |
+
+### Signature Authorization
+Identik dengan EQ-1 / Radar / Recorder: name-match, immutable, no delegation.
+Implementasi di `CnsdAmscMeterService::signRecord()`.
+
+### Format Form Number
+`AMSC-YYMMDD-SEQ`
+Contoh: `AMSC-260519-001`
+
+### Roster Personnel
+Sama dengan EQ-1 / Radar / Recorder: hanya `employee_type = 'CNS'`. Tidak ambil TFP.
+Jika tidak ada teknisi CNSD pada shift → 422.
+
+### Frontend Input Variants
+| Section | Input Type | Options |
+|---|---|---|
+| Front Panel `Normal / Alrm` | dropdown | Normal, Alrm |
+| Front Panel `√ / -` | dropdown | √, - |
+| Front Panel `OK / Not` | dropdown | OK, Not |
+| Power Supply Unit | free text | — |
+| Channel AMSC status | dropdown | Normal, U/S, Fault |
+| Channel AMSC address/cct | display/free text | — |
+| Lingkungan `Max 22°C` | free text | — |
+| Lingkungan `√` | dropdown | √, - |
+
+### Channel AMSC Default Values
+Channels 1-32 seeded with default address and keterangan from paper form.
+Channel 17 and 19 have default status `U/S` (ALTRN CH01, ALTRN CH04).
+
+### EQ-1, Radar, dan Recorder Tetap Berjalan
+Modul AMSC hidup di tabel & namespace terpisah (`cnsd_amsc_meter_*`).
+Tidak ada perubahan ke modul lain; keempat modul independen.
