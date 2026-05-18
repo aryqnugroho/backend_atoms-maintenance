@@ -9,6 +9,7 @@ use App\Http\Controllers\Api\V1\Cnsd\CnsdReadinessController;
 use App\Http\Controllers\Api\V1\Cnsd\CnsdRadarMeterController;
 use App\Http\Controllers\Api\V1\Cnsd\CnsdRecorderMeterController;
 use App\Http\Controllers\Api\V1\Tfp\TfpAobGroundController;
+use App\Http\Controllers\Api\V1\Tfp\TfpAobLt12Controller;
 
 Route::prefix('v1')->group(function () {
     // ─── Public Auth Routes ────────────────────────────────────────────────
@@ -116,6 +117,21 @@ Route::prefix('v1')->group(function () {
             Route::put('/{id}',     [TfpAobGroundController::class, 'update'])->whereNumber('id');
             Route::post('/{id}/sign', [TfpAobGroundController::class, 'sign'])->whereNumber('id');
             Route::delete('/{id}', [TfpAobGroundController::class, 'destroy'])
+                ->whereNumber('id')
+                ->middleware('role:Admin,Manager Teknik');
+        });
+
+        // ─── TFP Performance Check AOB Lantai 1 & 2 ───────────
+        Route::prefix('tfp/aob-lt12')->group(function () {
+            Route::get('/template', [TfpAobLt12Controller::class, 'template']);
+            Route::get('/years',    [TfpAobLt12Controller::class, 'years']);
+            Route::get('/',         [TfpAobLt12Controller::class, 'index']);
+            Route::post('/', [TfpAobLt12Controller::class, 'store'])
+                ->middleware('role:Admin,Manager Teknik,Supervisor TFP,Teknisi TFP');
+            Route::get('/{id}',     [TfpAobLt12Controller::class, 'show'])->whereNumber('id');
+            Route::put('/{id}',     [TfpAobLt12Controller::class, 'update'])->whereNumber('id');
+            Route::post('/{id}/sign', [TfpAobLt12Controller::class, 'sign'])->whereNumber('id');
+            Route::delete('/{id}', [TfpAobLt12Controller::class, 'destroy'])
                 ->whereNumber('id')
                 ->middleware('role:Admin,Manager Teknik');
         });
