@@ -12,6 +12,8 @@ use App\Http\Controllers\Api\V1\Cnsd\CnsdAmscMeterController;
 use App\Http\Controllers\Api\V1\Cnsd\CnsdTransmitterMeterController;
 use App\Http\Controllers\Api\V1\Tfp\TfpAobGroundController;
 use App\Http\Controllers\Api\V1\Tfp\TfpAobLt12Controller;
+use App\Http\Controllers\Api\V1\Tfp\TfpTransmitterTxController;
+use App\Http\Controllers\Api\V1\Tfp\TfpTowerController;
 use App\Http\Controllers\Api\V1\Grounding\GroundingReportController;
 
 Route::prefix('v1')->group(function () {
@@ -171,6 +173,36 @@ Route::prefix('v1')->group(function () {
             Route::put('/{id}',     [TfpAobLt12Controller::class, 'update'])->whereNumber('id');
             Route::post('/{id}/sign', [TfpAobLt12Controller::class, 'sign'])->whereNumber('id');
             Route::delete('/{id}', [TfpAobLt12Controller::class, 'destroy'])
+                ->whereNumber('id')
+                ->middleware('role:Admin,Manager Teknik');
+        });
+
+        // ─── TFP Performance Check Transmitter TX ──────────────
+        Route::prefix('tfp/transmitter-tx')->group(function () {
+            Route::get('/template', [TfpTransmitterTxController::class, 'template']);
+            Route::get('/years',    [TfpTransmitterTxController::class, 'years']);
+            Route::get('/',         [TfpTransmitterTxController::class, 'index']);
+            Route::post('/', [TfpTransmitterTxController::class, 'store'])
+                ->middleware('role:Admin,Manager Teknik,Supervisor TFP,Teknisi TFP');
+            Route::get('/{id}',     [TfpTransmitterTxController::class, 'show'])->whereNumber('id');
+            Route::put('/{id}',     [TfpTransmitterTxController::class, 'update'])->whereNumber('id');
+            Route::post('/{id}/sign', [TfpTransmitterTxController::class, 'sign'])->whereNumber('id');
+            Route::delete('/{id}', [TfpTransmitterTxController::class, 'destroy'])
+                ->whereNumber('id')
+                ->middleware('role:Admin,Manager Teknik');
+        });
+
+        // ─── TFP Performance Check Gedung Tower ────────────────
+        Route::prefix('tfp/tower')->group(function () {
+            Route::get('/template', [TfpTowerController::class, 'template']);
+            Route::get('/years',    [TfpTowerController::class, 'years']);
+            Route::get('/',         [TfpTowerController::class, 'index']);
+            Route::post('/', [TfpTowerController::class, 'store'])
+                ->middleware('role:Admin,Manager Teknik,Supervisor TFP,Teknisi TFP');
+            Route::get('/{id}',     [TfpTowerController::class, 'show'])->whereNumber('id');
+            Route::put('/{id}',     [TfpTowerController::class, 'update'])->whereNumber('id');
+            Route::post('/{id}/sign', [TfpTowerController::class, 'sign'])->whereNumber('id');
+            Route::delete('/{id}', [TfpTowerController::class, 'destroy'])
                 ->whereNumber('id')
                 ->middleware('role:Admin,Manager Teknik');
         });
