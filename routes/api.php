@@ -15,6 +15,7 @@ use App\Http\Controllers\Api\V1\Tfp\TfpAobLt12Controller;
 use App\Http\Controllers\Api\V1\Tfp\TfpTransmitterTxController;
 use App\Http\Controllers\Api\V1\Tfp\TfpTowerController;
 use App\Http\Controllers\Api\V1\Tfp\TfpRadarController;
+use App\Http\Controllers\Api\V1\Tfp\TfpDvorController;
 use App\Http\Controllers\Api\V1\Grounding\GroundingReportController;
 
 Route::prefix('v1')->group(function () {
@@ -219,6 +220,21 @@ Route::prefix('v1')->group(function () {
             Route::put('/{id}',     [TfpRadarController::class, 'update'])->whereNumber('id');
             Route::post('/{id}/sign', [TfpRadarController::class, 'sign'])->whereNumber('id');
             Route::delete('/{id}', [TfpRadarController::class, 'destroy'])
+                ->whereNumber('id')
+                ->middleware('role:Admin,Manager Teknik');
+        });
+
+        // ─── TFP Performance Check Gedung DVOR (VOR) ───────────────
+        Route::prefix('tfp/dvor')->group(function () {
+            Route::get('/template', [TfpDvorController::class, 'template']);
+            Route::get('/years',    [TfpDvorController::class, 'years']);
+            Route::get('/',         [TfpDvorController::class, 'index']);
+            Route::post('/', [TfpDvorController::class, 'store'])
+                ->middleware('role:Admin,Manager Teknik,Supervisor TFP,Teknisi TFP');
+            Route::get('/{id}',     [TfpDvorController::class, 'show'])->whereNumber('id');
+            Route::put('/{id}',     [TfpDvorController::class, 'update'])->whereNumber('id');
+            Route::post('/{id}/sign', [TfpDvorController::class, 'sign'])->whereNumber('id');
+            Route::delete('/{id}', [TfpDvorController::class, 'destroy'])
                 ->whereNumber('id')
                 ->middleware('role:Admin,Manager Teknik');
         });
