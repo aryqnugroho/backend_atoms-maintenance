@@ -17,6 +17,7 @@ use App\Http\Controllers\Api\V1\Tfp\TfpTowerController;
 use App\Http\Controllers\Api\V1\Tfp\TfpRadarController;
 use App\Http\Controllers\Api\V1\Tfp\TfpDvorController;
 use App\Http\Controllers\Api\V1\Tfp\TfpLocalizerController;
+use App\Http\Controllers\Api\V1\Tfp\TfpGlidepathController;
 use App\Http\Controllers\Api\V1\Grounding\GroundingReportController;
 
 Route::prefix('v1')->group(function () {
@@ -251,6 +252,21 @@ Route::prefix('v1')->group(function () {
             Route::put('/{id}',     [TfpLocalizerController::class, 'update'])->whereNumber('id');
             Route::post('/{id}/sign', [TfpLocalizerController::class, 'sign'])->whereNumber('id');
             Route::delete('/{id}', [TfpLocalizerController::class, 'destroy'])
+                ->whereNumber('id')
+                ->middleware('role:Admin,Manager Teknik');
+        });
+
+        // ─── TFP Performance Check Gedung Glide Path ────────────────
+        Route::prefix('tfp/glidepath')->group(function () {
+            Route::get('/template', [TfpGlidepathController::class, 'template']);
+            Route::get('/years',    [TfpGlidepathController::class, 'years']);
+            Route::get('/',         [TfpGlidepathController::class, 'index']);
+            Route::post('/', [TfpGlidepathController::class, 'store'])
+                ->middleware('role:Admin,Manager Teknik,Supervisor TFP,Teknisi TFP');
+            Route::get('/{id}',     [TfpGlidepathController::class, 'show'])->whereNumber('id');
+            Route::put('/{id}',     [TfpGlidepathController::class, 'update'])->whereNumber('id');
+            Route::post('/{id}/sign', [TfpGlidepathController::class, 'sign'])->whereNumber('id');
+            Route::delete('/{id}', [TfpGlidepathController::class, 'destroy'])
                 ->whereNumber('id')
                 ->middleware('role:Admin,Manager Teknik');
         });
