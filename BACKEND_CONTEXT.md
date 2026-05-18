@@ -601,3 +601,69 @@ Channel 17 and 19 have default status `U/S` (ALTRN CH01, ALTRN CH04).
 ### EQ-1, Radar, dan Recorder Tetap Berjalan
 Modul AMSC hidup di tabel & namespace terpisah (`cnsd_amsc_meter_*`).
 Tidak ada perubahan ke modul lain; keempat modul independen.
+
+
+## CNSD Transmitter Meter Reading — Phase 4 Module 5 (2026-05-19)
+
+Status: ✅ Live (fifth CNSD module after EQ-1, Radar, Recorder, and AMSC).
+
+### Tabel
+- `cnsd_transmitter_meter_records` — header, satu record per (form_type, facility, date, shift_type).
+  Field Transmitter-spesifik: `form_code` (default `FORM C-1`).
+- `cnsd_transmitter_meter_technicians` — snapshot teknisi CNSD per record. Per-row immutable signature.
+- `cnsd_transmitter_meter_items` — item form di-generate dari template.
+  Kolom: `frequency_label`, `merk`, `tx_label`, `status_value`, `power_output`, `modulasi`,
+  `keterangan`, `nominal`, `hasil`, `is_header`, `is_blocked`, `block_reason`.
+
+### Item Template
+Sumber: `app/Services/Cnsd/CnsdTransmitterMeterTemplate.php`.
+
+| Section | Layout | Groups | Items |
+|---|---|---|---|
+| 1. TRANSMITTER / TX RADIO | Frequency/Merk/Status/Power/Modulasi/Keterangan | 9 groups (Ground, ADC, CDU, APP, TMA West, TMA East, ER Makassar, ATIS, Back Up Radio) | ~40 TX items + 9 headers |
+| 2. LINGKUNGAN KERJA | NO/Kegiatan/Nominal/Hasil/Keterangan | 1 group | 4 items |
+
+### Status Dropdown Rules
+- PAE merk (Primary frequencies): On Air / STBY
+- OTE merk (Secondary frequencies): Online / Offline
+- CDU (group 3, all PAE): Online / Offline
+- TMA West (group 5, all PAE): On Air / STBY
+- Back Up Radio (group 9): BLOCKED — status cell disabled, backend rejects update
+
+### Blocked Items (Back Up Radio)
+- Group 9 items have `is_blocked = true`.
+- Backend `updateItems()` allows `power_output`, `modulasi`, `keterangan` but NOT `status_value` for blocked items.
+- Frontend renders status cell as grey/disabled.
+
+### Endpoints (semua di bawah `/api/v1/cnsd/transmitter-meter`)
+
+| Method | URI | Roles |
+|---|---|---|
+| GET    | `/` | semua authenticated |
+| GET    | `/years` | semua authenticated |
+| GET    | `/template` | semua authenticated |
+| POST   | `/` | Admin / MT / Sup CNSD / Teknisi CNSD |
+| GET    | `/{id}` | semua authenticated |
+| PUT    | `/{id}` | semua authenticated (update item values, blocked status rejected) |
+| POST   | `/{id}/sign` | sesuai role + nama signer match |
+| DELETE | `/{id}` | Admin / MT |
+
+### Signature Authorization
+Identik dengan EQ-1 / Radar / Recorder / AMSC: name-match, immutable, no delegation.
+Implementasi di `CnsdTransmitterMeterService::signRecord()`.
+
+### Format Form Number
+`TRANSMITTER-YYMMDD-SEQ`
+Contoh: `TRANSMITTER-260519-001`
+
+### Roster Personnel
+Sama dengan EQ-1 / Radar / Recorder / AMSC: hanya `employee_type = 'CNS'`.
+Tidak ambil TFP. Jika tidak ada teknisi CNSD pada shift → 422.
+
+### Time Filled
+`time_filled` di-refresh setiap kali user Simpan Perubahan (pola AMSC/TFP).
+`day_name` di-set saat create.
+
+### EQ-1, Radar, Recorder, dan AMSC Tetap Berjalan
+Modul Transmitter hidup di tabel & namespace terpisah (`cnsd_transmitter_meter_*`).
+Tidak ada perubahan ke modul lain; kelima modul independen.
