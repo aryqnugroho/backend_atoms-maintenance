@@ -198,6 +198,15 @@ class CnsdTransmitterMeterService
                     'user_id'  => (int) $person->user_id,
                 ];
             }
+
+            // Exclude supervisor and manager from the technician list.
+            $technicians = \App\Services\WorkOrderService::excludeSignerRoles(
+                $technicians,
+                $rosterSupervisor ? (int) $rosterSupervisor->user_id : null,
+                $supervisor?->name,
+                $rosterManager ? (int) $rosterManager->user_id : null,
+                $manager?->name,
+            );
         } catch (\Throwable $e) {
             Log::warning('CnsdTransmitterMeterService: roster lookup failed', [
                 'shift_type' => $shiftType,

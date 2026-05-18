@@ -675,6 +675,56 @@ class WorkOrderService
     }
 
     /**
+     * Exclude supervisor and manager from the technicians list.
+     *
+     * Rule: if a person is already assigned as Supervisor or Manager Teknik on
+     * a form, they must NOT appear again in the Pelaksana Teknisi list.
+     *
+     * Matching priority:
+     *   1. user_id comparison (most reliable — same integer from rostering)
+     *   2. Tolerant name match fallback (trim + collapse + case-insensitive)
+     *
+     * @param  array<int, array{local_id:int|null, name:string, user_id:int}>  $technicians
+     * @param  int|null  $supervisorUserId   rostering user_id of the supervisor (null if none)
+     * @param  string|null  $supervisorName  cached name of the supervisor (null if none)
+     * @param  int|null  $managerUserId      rostering user_id of the manager (null if none)
+     * @param  string|null  $managerName     cached name of the manager (null if none)
+     * @return array  filtered technicians list
+     */
+    public static function excludeSignerRoles(
+        array $technicians,
+        ?int $supervisorUserId,
+        ?string $supervisorName,
+        ?int $managerUserId,
+        ?string $managerName,
+    ): array {
+        return array_values(array_filter($technicians, static function (array $tech) use (
+            $supervisorUserId, $supervisorName, $managerUserId, $managerName
+        ) {
+            $techUserId = (int) ($tech['user_id'] ?? 0);
+            $techName   = $tech['name'] ?? '';
+
+            // Exclude if matches supervisor
+            if ($supervisorUserId && $techUserId === $supervisorUserId) {
+                return false;
+            }
+            if ($supervisorName && self::namesMatch($techName, $supervisorName)) {
+                return false;
+            }
+
+            // Exclude if matches manager
+            if ($managerUserId && $techUserId === $managerUserId) {
+                return false;
+            }
+            if ($managerName && self::namesMatch($techName, $managerName)) {
+                return false;
+            }
+
+            return true;
+        }));
+    }
+
+    /**
      * Replace personnel assignments for a work order.
      */
     private function syncPersonnel(WorkOrder $workOrder, array $personnel): void

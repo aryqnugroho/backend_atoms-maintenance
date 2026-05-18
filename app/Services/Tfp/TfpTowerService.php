@@ -131,6 +131,15 @@ class TfpTowerService
                 $local = $this->userResolver->ensureLocalUser((int) $person->user_id);
                 $technicians[] = ['local_id' => $local?->id, 'name' => $person->name, 'user_id' => (int) $person->user_id];
             }
+
+            // Exclude supervisor and manager from the technician list.
+            $technicians = \App\Services\WorkOrderService::excludeSignerRoles(
+                $technicians,
+                $rosterSupervisor ? (int) $rosterSupervisor->user_id : null,
+                $supervisor?->name,
+                $rosterManager ? (int) $rosterManager->user_id : null,
+                $manager?->name,
+            );
         } catch (\Throwable $e) {
             Log::warning('TfpTowerService: roster lookup failed', ['shift_type' => $shiftType, 'date' => $date, 'error' => $e->getMessage()]);
         }

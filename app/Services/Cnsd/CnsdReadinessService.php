@@ -247,6 +247,17 @@ class CnsdReadinessService
                     'user_id'  => (int) $person->user_id,
                 ];
             }
+
+            // Exclude supervisor and manager from the technician list.
+            // A person assigned as Supervisor or Manager Teknik must not appear
+            // again in the Pelaksana Teknisi rows.
+            $technicians = \App\Services\WorkOrderService::excludeSignerRoles(
+                $technicians,
+                $rosterSupervisor ? (int) $rosterSupervisor->user_id : null,
+                $supervisor?->name,
+                $rosterManager ? (int) $rosterManager->user_id : null,
+                $manager?->name,
+            );
         } catch (\Throwable $e) {
             Log::warning('CnsdReadinessService: roster lookup failed', [
                 'shift_type' => $shiftType,
