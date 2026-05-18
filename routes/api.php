@@ -14,6 +14,7 @@ use App\Http\Controllers\Api\V1\Tfp\TfpAobGroundController;
 use App\Http\Controllers\Api\V1\Tfp\TfpAobLt12Controller;
 use App\Http\Controllers\Api\V1\Tfp\TfpTransmitterTxController;
 use App\Http\Controllers\Api\V1\Tfp\TfpTowerController;
+use App\Http\Controllers\Api\V1\Tfp\TfpRadarController;
 use App\Http\Controllers\Api\V1\Grounding\GroundingReportController;
 
 Route::prefix('v1')->group(function () {
@@ -203,6 +204,21 @@ Route::prefix('v1')->group(function () {
             Route::put('/{id}',     [TfpTowerController::class, 'update'])->whereNumber('id');
             Route::post('/{id}/sign', [TfpTowerController::class, 'sign'])->whereNumber('id');
             Route::delete('/{id}', [TfpTowerController::class, 'destroy'])
+                ->whereNumber('id')
+                ->middleware('role:Admin,Manager Teknik');
+        });
+
+        // ─── TFP Performance Check Gedung Radar ────────────────────
+        Route::prefix('tfp/radar')->group(function () {
+            Route::get('/template', [TfpRadarController::class, 'template']);
+            Route::get('/years',    [TfpRadarController::class, 'years']);
+            Route::get('/',         [TfpRadarController::class, 'index']);
+            Route::post('/', [TfpRadarController::class, 'store'])
+                ->middleware('role:Admin,Manager Teknik,Supervisor TFP,Teknisi TFP');
+            Route::get('/{id}',     [TfpRadarController::class, 'show'])->whereNumber('id');
+            Route::put('/{id}',     [TfpRadarController::class, 'update'])->whereNumber('id');
+            Route::post('/{id}/sign', [TfpRadarController::class, 'sign'])->whereNumber('id');
+            Route::delete('/{id}', [TfpRadarController::class, 'destroy'])
                 ->whereNumber('id')
                 ->middleware('role:Admin,Manager Teknik');
         });
