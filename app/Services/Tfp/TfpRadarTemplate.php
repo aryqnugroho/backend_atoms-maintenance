@@ -15,27 +15,52 @@ class TfpRadarTemplate
     {
         $noDisabled = [];
 
+        // Row 13 (Power Factor): RD01, RD02, RD04-RD08 disabled; COS RD03 + UPS TOPAZ active
         $disabledPowerFactor = [
-            'panel_rd01' => true, 'panel_rd02' => true,
-            'panel_rd04' => true, 'panel_rd05' => true, 'panel_rd06' => true, 'panel_rd07' => true, 'panel_rd08' => true,
-        ];
-
-        $disabledBattery = [
-            'panel_rd01' => true, 'panel_rd02' => true,
-            'panel_cos_rd03_input' => true, 'panel_cos_rd03_output' => true,
-            'panel_rd04' => true, 'panel_rd05' => true, 'panel_rd06' => true, 'panel_rd08' => true,
-        ];
-
-        $disabledModeSupplai = [
-            'panel_rd01' => true, 'panel_rd02' => true,
-            'panel_rd04' => true, 'panel_rd05' => true, 'panel_rd06' => true, 'panel_rd07' => true, 'panel_rd08' => true,
-        ];
-
-        $disabledSingleValue = [
+            'panel_rd01' => true,
             'panel_rd02' => true,
-            'panel_cos_rd03_input' => true, 'panel_cos_rd03_output' => true,
-            'ups_topaz_input' => true, 'ups_topaz_output' => true,
-            'panel_rd04' => true, 'panel_rd05' => true, 'panel_rd06' => true, 'panel_rd07' => true, 'panel_rd08' => true,
+            'panel_rd04' => true,
+            'panel_rd05' => true,
+            'panel_rd06' => true,
+            'panel_rd07' => true,
+            'panel_rd08' => true,
+        ];
+
+        // Rows 14-17 (Battery): RD01, RD02, COS RD03, RD04, RD05, RD06, RD08 disabled; UPS TOPAZ + RD07 active
+        $disabledBattery = [
+            'panel_rd01'             => true,
+            'panel_rd02'             => true,
+            'panel_cos_rd03_input'   => true,
+            'panel_cos_rd03_output'  => true,
+            'panel_rd04'             => true,
+            'panel_rd05'             => true,
+            'panel_rd06'             => true,
+            'panel_rd08'             => true,
+        ];
+
+        // Rows 18-19 (Mode/Suplai): RD01, RD02, RD04-RD08 disabled; COS RD03 + UPS TOPAZ active
+        $disabledModeSupplai = [
+            'panel_rd01' => true,
+            'panel_rd02' => true,
+            'panel_rd04' => true,
+            'panel_rd05' => true,
+            'panel_rd06' => true,
+            'panel_rd07' => true,
+            'panel_rd08' => true,
+        ];
+
+        // Row 20 (kWh meter): single value in panel_rd01, rest disabled
+        $disabledSingleValue = [
+            'panel_rd02'             => true,
+            'panel_cos_rd03_input'   => true,
+            'panel_cos_rd03_output'  => true,
+            'ups_topaz_input'        => true,
+            'ups_topaz_output'       => true,
+            'panel_rd04'             => true,
+            'panel_rd05'             => true,
+            'panel_rd06'             => true,
+            'panel_rd07'             => true,
+            'panel_rd08'             => true,
         ];
 
         return [
