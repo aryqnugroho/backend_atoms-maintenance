@@ -667,3 +667,56 @@ Tidak ambil TFP. Jika tidak ada teknisi CNSD pada shift → 422.
 ### EQ-1, Radar, Recorder, dan AMSC Tetap Berjalan
 Modul Transmitter hidup di tabel & namespace terpisah (`cnsd_transmitter_meter_*`).
 Tidak ada perubahan ke modul lain; kelima modul independen.
+
+
+## Grounding Report — Live (2026-05-19)
+
+Status: ✅ Live (first Grounding module).
+
+### Tabel
+- `grounding_report_records` — header per laporan. Multiple records per (date, shift_type) diperbolehkan.
+  Field: `report_number`, `date`, `day_name`, `time_filled`, `shift_type`, `work_unit` (default 'Cabang Surabaya'),
+  `equipment_name`, `equipment_location`, `status`, manager/supervisor signature columns, soft deletes.
+- `grounding_report_technicians` — snapshot teknisi TFP per record. Per-row immutable signature.
+- `grounding_report_items` — 9 items dari template (6 VISUAL + 3 PENGUKURAN).
+  Kolom: `section_name`, `item_number`, `item_name`, `standard`, `availability`, `condition`, `notes`.
+
+### Endpoints (semua di bawah `/api/v1/grounding/reports`)
+
+| Method | URI | Roles |
+|---|---|---|
+| GET    | `/` | semua authenticated |
+| GET    | `/years` | semua authenticated |
+| GET    | `/template` | semua authenticated |
+| POST   | `/` | Admin / MT / Sup TFP / Teknisi TFP |
+| GET    | `/{id}` | semua authenticated |
+| PUT    | `/{id}` | semua authenticated (update item values) |
+| POST   | `/{id}/sign` | sesuai role + nama signer match |
+| DELETE | `/{id}` | Admin / MT |
+
+### Signature Authorization
+Identik dengan TFP AOB Ground: name-match, immutable, no delegation.
+Implementasi di `GroundingReportService::signRecord()`.
+
+### Format Report Number
+`GROUNDING-YYMMDD-SEQ`
+Contoh: `GROUNDING-260519-001`
+
+### Roster Personnel
+`employee_type = 'Support'` (bukan 'CNS'). Supervisor TFP: `getShiftSupervisorByDivision(..., 'Support')`.
+Jika tidak ada teknisi TFP pada shift → 422.
+Multiple records per shift diperbolehkan (berbeda peralatan).
+
+### Template
+6 VISUAL items (Terminal Udara, Konduktor Turun, Modul Penangkal Petir, Sambungan dan Clamp,
+Kabel Pembumian, Lightning Counter) + 3 PENGUKURAN items (Nilai Tahanan Tanah ≤1Ω,
+Nilai Tahanan Pentanahan ≤1Ω, Uji Kontinuitas -).
+
+### Update Rules
+- VISUAL items: availability (Ada/Tidak Ada), condition (Baik/Tidak Baik), notes
+- PENGUKURAN items: condition, notes only (availability stays null)
+- time_filled refreshed on every updateItems call
+
+### TFP dan CNSD Tetap Berjalan
+Modul Grounding hidup di tabel & namespace terpisah (`grounding_report_*`).
+Tidak ada perubahan ke modul lain.
