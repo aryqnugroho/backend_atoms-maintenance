@@ -13,6 +13,7 @@ use App\Http\Controllers\Api\V1\Cnsd\CnsdTransmitterMeterController;
 use App\Http\Controllers\Api\V1\Tfp\TfpAobGroundController;
 use App\Http\Controllers\Api\V1\Tfp\TfpAobLt12Controller;
 use App\Http\Controllers\Api\V1\Tfp\TfpTransmitterTxController;
+use App\Http\Controllers\Api\V1\Tfp\TfpTowerController;
 
 Route::prefix('v1')->group(function () {
     // ─── Public Auth Routes ────────────────────────────────────────────────
@@ -186,6 +187,21 @@ Route::prefix('v1')->group(function () {
             Route::put('/{id}',     [TfpTransmitterTxController::class, 'update'])->whereNumber('id');
             Route::post('/{id}/sign', [TfpTransmitterTxController::class, 'sign'])->whereNumber('id');
             Route::delete('/{id}', [TfpTransmitterTxController::class, 'destroy'])
+                ->whereNumber('id')
+                ->middleware('role:Admin,Manager Teknik');
+        });
+
+        // ─── TFP Performance Check Gedung Tower ────────────────
+        Route::prefix('tfp/tower')->group(function () {
+            Route::get('/template', [TfpTowerController::class, 'template']);
+            Route::get('/years',    [TfpTowerController::class, 'years']);
+            Route::get('/',         [TfpTowerController::class, 'index']);
+            Route::post('/', [TfpTowerController::class, 'store'])
+                ->middleware('role:Admin,Manager Teknik,Supervisor TFP,Teknisi TFP');
+            Route::get('/{id}',     [TfpTowerController::class, 'show'])->whereNumber('id');
+            Route::put('/{id}',     [TfpTowerController::class, 'update'])->whereNumber('id');
+            Route::post('/{id}/sign', [TfpTowerController::class, 'sign'])->whereNumber('id');
+            Route::delete('/{id}', [TfpTowerController::class, 'destroy'])
                 ->whereNumber('id')
                 ->middleware('role:Admin,Manager Teknik');
         });
