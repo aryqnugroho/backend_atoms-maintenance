@@ -16,6 +16,7 @@ use App\Http\Controllers\Api\V1\Tfp\TfpTransmitterTxController;
 use App\Http\Controllers\Api\V1\Tfp\TfpTowerController;
 use App\Http\Controllers\Api\V1\Tfp\TfpRadarController;
 use App\Http\Controllers\Api\V1\Tfp\TfpDvorController;
+use App\Http\Controllers\Api\V1\Tfp\TfpLocalizerController;
 use App\Http\Controllers\Api\V1\Grounding\GroundingReportController;
 
 Route::prefix('v1')->group(function () {
@@ -235,6 +236,21 @@ Route::prefix('v1')->group(function () {
             Route::put('/{id}',     [TfpDvorController::class, 'update'])->whereNumber('id');
             Route::post('/{id}/sign', [TfpDvorController::class, 'sign'])->whereNumber('id');
             Route::delete('/{id}', [TfpDvorController::class, 'destroy'])
+                ->whereNumber('id')
+                ->middleware('role:Admin,Manager Teknik');
+        });
+
+        // ─── TFP Performance Check Gedung Localizer ─────────────────
+        Route::prefix('tfp/localizer')->group(function () {
+            Route::get('/template', [TfpLocalizerController::class, 'template']);
+            Route::get('/years',    [TfpLocalizerController::class, 'years']);
+            Route::get('/',         [TfpLocalizerController::class, 'index']);
+            Route::post('/', [TfpLocalizerController::class, 'store'])
+                ->middleware('role:Admin,Manager Teknik,Supervisor TFP,Teknisi TFP');
+            Route::get('/{id}',     [TfpLocalizerController::class, 'show'])->whereNumber('id');
+            Route::put('/{id}',     [TfpLocalizerController::class, 'update'])->whereNumber('id');
+            Route::post('/{id}/sign', [TfpLocalizerController::class, 'sign'])->whereNumber('id');
+            Route::delete('/{id}', [TfpLocalizerController::class, 'destroy'])
                 ->whereNumber('id')
                 ->middleware('role:Admin,Manager Teknik');
         });
