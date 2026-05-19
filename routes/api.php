@@ -312,7 +312,7 @@ Route::prefix('v1')->group(function () {
             Route::get('/years',    [GroundCheckAdcController::class, 'years']);
             Route::get('/',         [GroundCheckAdcController::class, 'index']);
             Route::post('/', [GroundCheckAdcController::class, 'store'])
-                ->middleware('role:Admin,Manager Teknik,Supervisor TFP,Teknisi TFP');
+                ->middleware('role:Admin,Manager Teknik,Supervisor CNSD,Teknisi CNSD');
             Route::get('/{id}',     [GroundCheckAdcController::class, 'show'])->whereNumber('id');
             Route::put('/{id}',     [GroundCheckAdcController::class, 'update'])->whereNumber('id');
             Route::post('/{id}/sign', [GroundCheckAdcController::class, 'sign'])->whereNumber('id');

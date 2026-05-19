@@ -20,13 +20,12 @@ use RuntimeException;
 /**
  * GroundCheckAdcService — orchestrates the Ground Check ADC form.
  *
- * Mirrors TfpAobGroundService:
- *   - Personnel resolved from atoms-rostering (date + shift_type).
- *   - Only Support employees taken as technicians (TFP personnel).
- *   - Supervisor TFP = getShiftSupervisorByDivision($shift, $date, 'Support').
- *   - Signatures immutable, name-matched, never delegated.
- *   - Never writes to rostering DB.
- *   - Items seeded from GroundCheckAdcTemplate at create.
+ * Personnel are resolved from atoms-rostering (date + shift_type).
+ * Only CNS employees are taken as technicians (CNSD personnel).
+ * Supervisor CNSD = getShiftSupervisorByDivision($shift, $date, 'CNS').
+ * Signatures immutable, name-matched, never delegated.
+ * Never writes to rostering DB.
+ * Items seeded from GroundCheckAdcTemplate at create.
  */
 class GroundCheckAdcService
 {
@@ -136,9 +135,9 @@ class GroundCheckAdcService
 
         if (empty($rosterContext['technicians'])) {
             throw new RuntimeException(
-                'Tidak ada teknisi TFP yang bertugas pada tanggal '
+                'Tidak ada teknisi CNSD yang bertugas pada tanggal '
                 . $date . ' shift ' . $shiftType
-                . '. Pastikan roster sudah dipublish dan terdapat personel Support untuk shift ini.',
+                . '. Pastikan roster sudah dipublish dan terdapat personel CNS untuk shift ini.',
                 422
             );
         }
@@ -222,7 +221,7 @@ class GroundCheckAdcService
 
     /**
      * Resolve roster personnel for a given shift+date.
-     * Uses TFP personnel (employee_type = 'Support').
+     * Uses CNSD personnel (employee_type = 'CNS').
      */
     private function resolveRosterContext(string $shiftType, string $date): array
     {
@@ -236,15 +235,15 @@ class GroundCheckAdcService
                 $manager = $this->userResolver->ensureLocalUser((int) $rosterManager->user_id);
             }
 
-            $rosterSupervisor = $this->rosteringService->getShiftSupervisorByDivision($shiftType, $date, 'Support');
+            $rosterSupervisor = $this->rosteringService->getShiftSupervisorByDivision($shiftType, $date, 'CNS');
             if ($rosterSupervisor) {
                 $supervisor = $this->userResolver->ensureLocalUser((int) $rosterSupervisor->user_id);
             }
 
-            $personnel    = $this->rosteringService->getShiftPersonnel($shiftType, $date);
-            $supportOnly  = $personnel->filter(fn ($p) => $p->employee_type === 'Support')->values();
+            $personnel = $this->rosteringService->getShiftPersonnel($shiftType, $date);
+            $cnsOnly   = $personnel->filter(fn ($p) => $p->employee_type === 'CNS')->values();
 
-            foreach ($supportOnly as $person) {
+            foreach ($cnsOnly as $person) {
                 $local = $this->userResolver->ensureLocalUser((int) $person->user_id);
                 $technicians[] = [
                     'local_id' => $local?->id,
@@ -414,20 +413,20 @@ class GroundCheckAdcService
 
         if (!$expectedName) {
             throw new SignerNotAuthorizedException(
-                'Form ini tidak memiliki ' . ($role === 'manager' ? 'Manager Teknik' : 'Supervisor TFP')
+                'Form ini tidak memiliki ' . ($role === 'manager' ? 'Manager Teknik' : 'Supervisor CNSD')
                 . ' yang ditugaskan, sehingga tanda tangan tidak diperlukan.'
             );
         }
 
         $roleOk = match ($role) {
             'manager'    => $signer->isManager(),
-            'supervisor' => $signer->isSupervisorTfp() || $signer->isSupervisor(),
+            'supervisor' => $signer->isSupervisorCnsd() || $signer->isSupervisor(),
             default      => false,
         };
         if (!$roleOk) {
             throw new SignerNotAuthorizedException(sprintf(
                 'Hanya %s yang berhak menandatangani role ini.',
-                $role === 'manager' ? 'Manager Teknik' : 'Supervisor TFP'
+                $role === 'manager' ? 'Manager Teknik' : 'Supervisor CNSD'
             ));
         }
 
@@ -447,8 +446,8 @@ class GroundCheckAdcService
         LocalUser $signer,
         ?int $technicianRowId,
     ): void {
-        if (!$signer->isTeknisi() && !$signer->isSupervisorTfp()) {
-            throw new SignerNotAuthorizedException('Hanya teknisi TFP yang berhak menandatangani role ini.');
+        if (!$signer->isTeknisi() && !$signer->isSupervisorCnsd()) {
+            throw new SignerNotAuthorizedException('Hanya teknisi CNSD yang berhak menandatangani role ini.');
         }
 
         /** @var GroundCheckAdcTechnician|null $row */
@@ -467,7 +466,7 @@ class GroundCheckAdcService
 
         if (!$row) {
             throw new SignerNotAuthorizedException(
-                'Anda bukan bagian dari teknisi TFP yang bertugas di shift ini, sehingga tidak dapat menandatangani.'
+                'Anda bukan bagian dari teknisi CNSD yang bertugas di shift ini, sehingga tidak dapat menandatangani.'
             );
         }
 
