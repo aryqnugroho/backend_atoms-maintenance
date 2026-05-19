@@ -198,6 +198,75 @@ class LogbookTfpService
         return $result;
     }
 
+    // ─── Equipment Management ──────────────────────────────────
+
+    /**
+     * Add a new equipment item to this logbook (not in master data).
+     */
+    public function addEquipmentToLogbook(LogbookTfp $logbook, string $name, string $category): LogbookTfp
+    {
+        // Find or create a TfpEquipment entry for this custom item
+        $equipment = \App\Models\Logbook\TfpEquipment::firstOrCreate(
+            ['name' => $name, 'category' => $category],
+            ['is_active' => true, 'order' => 999]
+        );
+
+        // Check if item already exists in this logbook
+        if ($logbook->items()->where('tfp_equipment_id', $equipment->id)->exists()) {
+            throw new RuntimeException("Peralatan '{$name}' sudah ada di logbook ini.");
+        }
+
+        $logbook->items()->create([
+            'tfp_equipment_id' => $equipment->id,
+            'status_pagi'      => null,
+            'status_siang'     => null,
+            'status_malam'     => null,
+        ]);
+
+        return $logbook->fresh(['items.equipment', 'notes', 'manager:id,name', 'creator:id,name']);
+    }
+
+    /**
+     * Edit equipment name/category for an item in this logbook.
+     */
+    public function editEquipmentInLogbook(LogbookTfp $logbook, int $itemId, array $data): LogbookTfp
+    {
+        $item = $logbook->items()->where('id', $itemId)->first();
+        if (!$item) {
+            throw new RuntimeException('Item peralatan tidak ditemukan.');
+        }
+
+        $equipment = $item->equipment;
+        if (!$equipment) {
+            throw new RuntimeException('Data peralatan tidak ditemukan.');
+        }
+
+        if (isset($data['name'])) {
+            $equipment->name = $data['name'];
+        }
+        if (isset($data['category'])) {
+            $equipment->category = $data['category'];
+        }
+        $equipment->save();
+
+        return $logbook->fresh(['items.equipment', 'notes', 'manager:id,name', 'creator:id,name']);
+    }
+
+    /**
+     * Remove an equipment item from this logbook.
+     */
+    public function removeEquipmentFromLogbook(LogbookTfp $logbook, int $itemId): LogbookTfp
+    {
+        $item = $logbook->items()->where('id', $itemId)->first();
+        if (!$item) {
+            throw new RuntimeException('Item peralatan tidak ditemukan.');
+        }
+
+        $item->delete();
+
+        return $logbook->fresh(['items.equipment', 'notes', 'manager:id,name', 'creator:id,name']);
+    }
+
     // ─── Update Items ──────────────────────────────────────────
 
     /**

@@ -98,6 +98,112 @@ class LogbookTfpController extends Controller
     }
 
     /**
+     * POST /api/v1/logbook/tfp/{id}/equipments
+     * Add a new equipment item to this logbook (Manager/Supervisor only).
+     */
+    public function addEquipment(Request $request, int $id): JsonResponse
+    {
+        $request->validate([
+            'name'     => ['required', 'string', 'max:200'],
+            'category' => ['required', 'string', 'max:100'],
+        ]);
+
+        $logbook = LogbookTfp::find($id);
+        if (!$logbook) {
+            return $this->error('Logbook tidak ditemukan.', null, 404);
+        }
+
+        $user = Auth::user();
+        if (!$user || (!$user->isManager() && !$user->isSupervisor() && !$user->isAdmin())) {
+            return $this->error('Hanya Manager Teknik atau Supervisor yang dapat mengelola peralatan.', null, 403);
+        }
+
+        if (!empty($logbook->manager_signature)) {
+            return $this->error('Logbook yang sudah ditandatangani tidak dapat diubah.', null, 409);
+        }
+
+        try {
+            $logbook = $this->service->addEquipmentToLogbook($logbook, $request->input('name'), $request->input('category'));
+        } catch (RuntimeException $e) {
+            return $this->error($e->getMessage(), null, 422);
+        }
+
+        $detail = $this->detail($logbook);
+        $detail['personnel_on_duty'] = $this->service->getPersonnelOnDuty($logbook->date->format('Y-m-d'));
+
+        return $this->success($detail, 'Equipment added');
+    }
+
+    /**
+     * PUT /api/v1/logbook/tfp/{id}/equipments/{itemId}
+     * Edit equipment name/category (Manager/Supervisor only).
+     */
+    public function editEquipment(Request $request, int $id, int $itemId): JsonResponse
+    {
+        $request->validate([
+            'name'     => ['sometimes', 'required', 'string', 'max:200'],
+            'category' => ['sometimes', 'required', 'string', 'max:100'],
+        ]);
+
+        $logbook = LogbookTfp::find($id);
+        if (!$logbook) {
+            return $this->error('Logbook tidak ditemukan.', null, 404);
+        }
+
+        $user = Auth::user();
+        if (!$user || (!$user->isManager() && !$user->isSupervisor() && !$user->isAdmin())) {
+            return $this->error('Hanya Manager Teknik atau Supervisor yang dapat mengelola peralatan.', null, 403);
+        }
+
+        if (!empty($logbook->manager_signature)) {
+            return $this->error('Logbook yang sudah ditandatangani tidak dapat diubah.', null, 409);
+        }
+
+        try {
+            $logbook = $this->service->editEquipmentInLogbook($logbook, $itemId, $request->only(['name', 'category']));
+        } catch (RuntimeException $e) {
+            return $this->error($e->getMessage(), null, 422);
+        }
+
+        $detail = $this->detail($logbook);
+        $detail['personnel_on_duty'] = $this->service->getPersonnelOnDuty($logbook->date->format('Y-m-d'));
+
+        return $this->success($detail, 'Equipment updated');
+    }
+
+    /**
+     * DELETE /api/v1/logbook/tfp/{id}/equipments/{itemId}
+     * Remove an equipment item (Manager/Supervisor only).
+     */
+    public function removeEquipment(int $id, int $itemId): JsonResponse
+    {
+        $logbook = LogbookTfp::find($id);
+        if (!$logbook) {
+            return $this->error('Logbook tidak ditemukan.', null, 404);
+        }
+
+        $user = Auth::user();
+        if (!$user || (!$user->isManager() && !$user->isSupervisor() && !$user->isAdmin())) {
+            return $this->error('Hanya Manager Teknik atau Supervisor yang dapat mengelola peralatan.', null, 403);
+        }
+
+        if (!empty($logbook->manager_signature)) {
+            return $this->error('Logbook yang sudah ditandatangani tidak dapat diubah.', null, 409);
+        }
+
+        try {
+            $logbook = $this->service->removeEquipmentFromLogbook($logbook, $itemId);
+        } catch (RuntimeException $e) {
+            return $this->error($e->getMessage(), null, 422);
+        }
+
+        $detail = $this->detail($logbook);
+        $detail['personnel_on_duty'] = $this->service->getPersonnelOnDuty($logbook->date->format('Y-m-d'));
+
+        return $this->success($detail, 'Equipment removed');
+    }
+
+    /**
      * PUT /api/v1/logbook/tfp/{id}/items
      * Update S/US status for equipment items.
      */

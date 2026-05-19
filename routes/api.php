@@ -421,6 +421,9 @@ Route::prefix('v1')->group(function () {
             Route::put('/{id}/items', [LogbookTfpController::class, 'updateItems'])->whereNumber('id');
             Route::post('/{id}/notes', [LogbookTfpController::class, 'addNote'])->whereNumber('id');
             Route::delete('/{id}/notes/{noteId}', [LogbookTfpController::class, 'deleteNote'])->whereNumber('id')->whereNumber('noteId');
+            Route::post('/{id}/equipments', [LogbookTfpController::class, 'addEquipment'])->whereNumber('id');
+            Route::put('/{id}/equipments/{itemId}', [LogbookTfpController::class, 'editEquipment'])->whereNumber('id')->whereNumber('itemId');
+            Route::delete('/{id}/equipments/{itemId}', [LogbookTfpController::class, 'removeEquipment'])->whereNumber('id')->whereNumber('itemId');
             Route::post('/{id}/sign', [LogbookTfpController::class, 'sign'])->whereNumber('id');
             Route::delete('/{id}', [LogbookTfpController::class, 'destroy'])
                 ->whereNumber('id')
