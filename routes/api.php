@@ -27,6 +27,7 @@ use App\Http\Controllers\Api\V1\Grounding\GroundingReportController;
 use App\Http\Controllers\Api\V1\GroundCheck\GroundCheckAdcController;
 use App\Http\Controllers\Api\V1\Reporting\ReportingDamageReportController;
 use App\Http\Controllers\Api\V1\Reporting\ReportingPersonController;
+use App\Http\Controllers\Api\V1\Logbook\LogbookTfpController;
 
 Route::prefix('v1')->group(function () {
     // ─── Public Auth Routes ────────────────────────────────────────────────
@@ -405,6 +406,20 @@ Route::prefix('v1')->group(function () {
             Route::put('/{id}',     [ReportingDamageReportController::class, 'update'])->whereNumber('id');
             Route::post('/{id}/sign', [ReportingDamageReportController::class, 'sign'])->whereNumber('id');
             Route::delete('/{id}', [ReportingDamageReportController::class, 'destroy'])
+                ->whereNumber('id')
+                ->middleware('role:Admin,Manager Teknik');
+        });
+
+        // ─── Logbook TFP ───────────────────────────────────────────
+        Route::prefix('logbook/tfp')->group(function () {
+            Route::get('/years',      [LogbookTfpController::class, 'years']);
+            Route::get('/equipments', [LogbookTfpController::class, 'equipments']);
+            Route::get('/',           [LogbookTfpController::class, 'index']);
+            Route::post('/', [LogbookTfpController::class, 'store'])
+                ->middleware('role:Admin,Manager Teknik,Supervisor TFP,Teknisi TFP');
+            Route::get('/{id}',       [LogbookTfpController::class, 'show'])->whereNumber('id');
+            Route::post('/{id}/sign', [LogbookTfpController::class, 'sign'])->whereNumber('id');
+            Route::delete('/{id}', [LogbookTfpController::class, 'destroy'])
                 ->whereNumber('id')
                 ->middleware('role:Admin,Manager Teknik');
         });
