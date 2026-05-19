@@ -22,6 +22,8 @@ use App\Http\Controllers\Api\V1\Tfp\TfpLocalizerController;
 use App\Http\Controllers\Api\V1\Tfp\TfpGlidepathController;
 use App\Http\Controllers\Api\V1\Grounding\GroundingReportController;
 use App\Http\Controllers\Api\V1\GroundCheck\GroundCheckAdcController;
+use App\Http\Controllers\Api\V1\Reporting\ReportingDamageReportController;
+use App\Http\Controllers\Api\V1\Reporting\ReportingPersonController;
 
 Route::prefix('v1')->group(function () {
     // ─── Public Auth Routes ────────────────────────────────────────────────
@@ -333,6 +335,28 @@ Route::prefix('v1')->group(function () {
             Route::put('/{id}',     [GroundCheckAdcController::class, 'update'])->whereNumber('id');
             Route::post('/{id}/sign', [GroundCheckAdcController::class, 'sign'])->whereNumber('id');
             Route::delete('/{id}', [GroundCheckAdcController::class, 'destroy'])
+                ->whereNumber('id')
+                ->middleware('role:Admin,Manager Teknik');
+        });
+
+        // ─── Reporting / Laporan Kerusakan ─────────────────────────
+        // Form Laporan Kerusakan (Damage Report). Tidak menggunakan roster
+        // otomatis — Manager Teknik dan Pelaksana Perbaikan dipilih manual.
+        Route::prefix('reporting/personnel')->group(function () {
+            Route::get('/', [ReportingPersonController::class, 'index']);
+        });
+
+        Route::prefix('reporting/damage-reports')->group(function () {
+            Route::get('/years',    [ReportingDamageReportController::class, 'years']);
+
+            Route::get('/',         [ReportingDamageReportController::class, 'index']);
+            Route::post('/', [ReportingDamageReportController::class, 'store'])
+                ->middleware('role:Admin,Manager Teknik,Supervisor CNSD,Supervisor TFP,Teknisi CNSD,Teknisi TFP');
+
+            Route::get('/{id}',     [ReportingDamageReportController::class, 'show'])->whereNumber('id');
+            Route::put('/{id}',     [ReportingDamageReportController::class, 'update'])->whereNumber('id');
+            Route::post('/{id}/sign', [ReportingDamageReportController::class, 'sign'])->whereNumber('id');
+            Route::delete('/{id}', [ReportingDamageReportController::class, 'destroy'])
                 ->whereNumber('id')
                 ->middleware('role:Admin,Manager Teknik');
         });

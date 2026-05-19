@@ -720,3 +720,67 @@ Nilai Tahanan Pentanahan ≤1Ω, Uji Kontinuitas -).
 ### TFP dan CNSD Tetap Berjalan
 Modul Grounding hidup di tabel & namespace terpisah (`grounding_report_*`).
 Tidak ada perubahan ke modul lain.
+
+
+## Reporting / Laporan Kerusakan — Phase 6 Module 1 (2026-05-19)
+
+Status: ✅ Live (first Reporting module).
+
+### Karakteristik Unik
+Reporting **TIDAK** menggunakan rostering shift personnel. Manager Teknik dan
+Pelaksana Perbaikan dipilih manual oleh user. Tidak ada konsep shift.
+
+### Tabel
+- `reporting_damage_reports` — header laporan. Status: ongoing | on_hold | completed.
+  Manager Teknik signature lives di kolom-kolom record ini.
+- `reporting_damage_repairers` — per-row pelaksana + signature immutable.
+  Repairers di-pilih manual; bisa campur Teknisi CNSD + Teknisi TFP + Supervisor.
+
+### Endpoints (semua di bawah `/api/v1/reporting`)
+
+| Method | URI | Roles |
+|---|---|---|
+| GET    | `/damage-reports` | semua authenticated |
+| GET    | `/damage-reports/years` | semua authenticated |
+| POST   | `/damage-reports` | Admin / MT / Sup CNSD/TFP / Tek CNSD/TFP |
+| GET    | `/damage-reports/{id}` | semua authenticated |
+| PUT    | `/damage-reports/{id}` | semua authenticated |
+| POST   | `/damage-reports/{id}/sign` | sesuai role + nama signer match |
+| DELETE | `/damage-reports/{id}` | Admin / MT |
+| GET    | `/personnel?scope=manager\|repairer&search=&division=` | semua authenticated |
+
+### Format Nomor Surat
+`LTK-YYMMDD-SEQ`
+Contoh: `LTK-260519-001`
+
+- Prefix `LTK` (Laporan Teknik Kerusakan)
+- Reset sequence per kalender hari
+- Counter pakai `withTrashed()`
+
+### Personnel Selector
+- Source: `local_users` cache (TIDAK query rostering shift).
+- Manager scope: `role = "Manager Teknik"` saja.
+- Repairer scope: gabungan Teknisi CNSD/TFP + Supervisor CNSD/TFP.
+
+### Signature Authorization
+- Manager: hanya `role = Manager Teknik` + `manager_id == signer.id` atau name match.
+- Repairer: role harus Teknisi/Supervisor CNSD/TFP atau Admin. Match by
+  `repairer_row_id` (priority) → `person_id == signer.id` → name match.
+- Wrong signer → 403. Already signed → 409. Invalid base64 → 422. Immutable.
+
+### Kode Hambatan (9 codes)
+AU, PK, TT, SC, TR, ST, PC, AL, TH. Jika `obstacle_code = AL`,
+`obstacle_description` (Alasan Lain) **wajib** diisi.
+
+### Validation Highlights
+- `report_date`, `location`, `facility`, `equipment_name`, `damage_category`,
+  `damage_description`, `manager_id`, `repairers[]` (min 1) wajib.
+- `damage_category` ∈ {Ringan, Sedang, Berat}.
+- `repair_by_type` ∈ {lokasi, pusat} atau null.
+- `obstacle_code` validates against 9 codes; null ok.
+- `repairers.*.person_id` tidak boleh duplikat dalam payload.
+
+### Modul Lain Tetap Berjalan
+Reporting hidup di tabel & namespace terpisah (`reporting_*`,
+`App\Models\Reporting`, `App\Services\Reporting`). Tidak ada perubahan ke
+Work Order, CNSD, TFP, Grounding, Ground Check.
