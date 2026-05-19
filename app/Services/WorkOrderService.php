@@ -581,81 +581,37 @@ class WorkOrderService
      */
     private function assertSignerCanSignRole(WorkOrder $workOrder, string $role, LocalUser $signer): void
     {
-        // Pre-flight: the signer must hold the matching role at minimum.
-        $hasMatchingRole = match ($role) {
-            'mt'         => $signer->isManager(),
-            'supervisor' => $signer->isSupervisor(),
-            'technician' => $signer->isTeknisi(),
-            default      => false,
+        // Use centralized role-based delegation authorization
+        $slotType = \App\Services\SignatureAuthorizationService::slotType($role);
+
+        // Resolve target ID and name for the slot
+        $targetId = match ($role) {
+            'mt'         => $workOrder->manager_id,
+            'supervisor' => $workOrder->supervisor_id,
+            'technician' => $workOrder->assigned_technician_id,
+            default      => null,
         };
-
-        if (!$hasMatchingRole) {
-            throw new SignerNotAuthorizedException(
-                'Hanya user dengan role yang sesuai yang boleh menandatangani Work Order ini.'
-            );
-        }
-
-        // Name-based authorization: the authenticated user must match the
-        // person whose name was cached on the WO at creation.
-        $expectedName = match ($role) {
+        $targetName = match ($role) {
             'mt'         => $workOrder->mt_name ?: $workOrder->manager_name_snapshot,
             'supervisor' => $workOrder->supervisor_name ?: $workOrder->supervisor_name_snapshot,
             'technician' => $workOrder->technician_name,
             default      => null,
         };
 
-        if (!$expectedName) {
-            // No cached signer name — fall back to ID-based matching where possible.
-            $idMatchOk = match ($role) {
-                'mt'         => $workOrder->manager_id === null || $workOrder->manager_id === $signer->id,
-                'supervisor' => $workOrder->supervisor_id === null || $workOrder->supervisor_id === $signer->id,
-                'technician' => $workOrder->assigned_technician_id === null
-                                || $workOrder->assigned_technician_id === $signer->id
-                                || $workOrder->personnel()->where('user_id', $signer->id)->exists(),
-                default      => false,
-            };
-
-            if (!$idMatchOk) {
-                throw new SignerNotAuthorizedException(
-                    'Tanda tangan hanya dapat dilakukan oleh penanda tangan yang berwenang.'
-                );
-            }
-            return;
-        }
-
-        if (!$this->namesMatch($expectedName, $signer->name)) {
-            throw new SignerNotAuthorizedException(sprintf(
-                'Tanda tangan hanya dapat dilakukan oleh %s. Tidak boleh diwakilkan.',
-                $expectedName
-            ));
-        }
-
-        // Extra guard: when the WO has explicit IDs, also enforce ID equality so
-        // a homonym cannot sign on behalf of a different person with the same name.
-        if ($role === 'supervisor' && $workOrder->supervisor_id && $workOrder->supervisor_id !== $signer->id) {
-            throw new SignerNotAuthorizedException(sprintf(
-                'Tanda tangan hanya dapat dilakukan oleh %s. Tidak boleh diwakilkan.',
-                $expectedName
-            ));
-        }
-
-        if ($role === 'technician' && $workOrder->assigned_technician_id && $workOrder->assigned_technician_id !== $signer->id) {
-            // For shift WOs, also accept any user listed in personnel
+        // For technician in shift WO: if signer is in personnel list, allow
+        if ($role === 'technician' && $slotType === 'technician') {
             $isInPersonnel = $workOrder->personnel()->where('user_id', $signer->id)->exists();
-            if (!$isInPersonnel) {
-                throw new SignerNotAuthorizedException(sprintf(
-                    'Tanda tangan hanya dapat dilakukan oleh %s. Tidak boleh diwakilkan.',
-                    $expectedName
-                ));
+            if ($isInPersonnel) {
+                return; // Personnel member can sign technician slot
             }
         }
 
-        if ($role === 'mt' && $workOrder->manager_id && $workOrder->manager_id !== $signer->id) {
-            throw new SignerNotAuthorizedException(sprintf(
-                'Tanda tangan hanya dapat dilakukan oleh %s. Tidak boleh diwakilkan.',
-                $expectedName
-            ));
-        }
+        \App\Services\SignatureAuthorizationService::authorize(
+            $signer,
+            $slotType,
+            $targetId ? (int) $targetId : null,
+            $targetName,
+        );
     }
 
     /**

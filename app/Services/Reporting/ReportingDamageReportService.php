@@ -433,20 +433,9 @@ class ReportingDamageReportService
             );
         }
 
-        if (!$signer->isManager()) {
-            throw new SignerNotAuthorizedException('Hanya Manager Teknik yang berhak menandatangani role ini.');
-        }
-
-        // Prefer user_id match; fallback to name match
-        $idMatches = $report->manager_id && $report->manager_id === $signer->id;
-        $nameMatches = WorkOrderService::namesMatch($expectedName, $signer->name);
-
-        if (!$idMatches && !$nameMatches) {
-            throw new SignerNotAuthorizedException(sprintf(
-                'Tanda tangan hanya dapat dilakukan oleh %s. Tidak boleh diwakilkan.',
-                $expectedName
-            ));
-        }
+        // Use centralized role-based delegation authorization
+        $targetId = $report->manager_id ? (int) $report->manager_id : null;
+        \App\Services\SignatureAuthorizationService::authorize($signer, 'manager', $targetId, $expectedName);
 
         // HasSignature trait enforces immutability + base64 PNG validation.
         $report->saveSignature('manager', $base64, $signer->id);
@@ -458,12 +447,8 @@ class ReportingDamageReportService
         LocalUser $signer,
         ?int $repairerRowId,
     ): void {
-        // Repairer can be Teknisi CNSD/TFP or Supervisor CNSD/TFP
-        if (!$signer->isTeknisi() && !$signer->isSupervisor() && !$signer->isAdmin()) {
-            throw new SignerNotAuthorizedException(
-                'Hanya teknisi atau supervisor CNSD/TFP yang berhak menandatangani sebagai pelaksana.'
-            );
-        }
+        // Use role-based delegation: Manager/Supervisor/Technician can all sign repairer slots
+        \App\Services\SignatureAuthorizationService::authorize($signer, 'technician', null, null);
 
         /** @var ReportingDamageRepairer|null $row */
         $row = null;
@@ -480,21 +465,15 @@ class ReportingDamageReportService
                 ->get()
                 ->first(fn (ReportingDamageRepairer $r) => WorkOrderService::namesMatch($r->person_name, $signer->name));
         }
+        // For delegation: pick first unsigned row if signer has permission
+        if (!$row) {
+            $row = $report->repairers()->whereNull('signature')->first();
+        }
 
         if (!$row) {
             throw new SignerNotAuthorizedException(
-                'Anda bukan bagian dari pelaksana perbaikan pada laporan ini, sehingga tidak dapat menandatangani.'
+                'Tidak ada slot pelaksana yang tersedia untuk ditandatangani pada laporan ini.'
             );
-        }
-
-        // Verify by id (preferred) or by name
-        $idMatches = $row->person_id && $row->person_id === $signer->id;
-        $nameMatches = WorkOrderService::namesMatch($row->person_name, $signer->name);
-        if (!$idMatches && !$nameMatches) {
-            throw new SignerNotAuthorizedException(sprintf(
-                'Tanda tangan hanya dapat dilakukan oleh %s. Tidak boleh diwakilkan.',
-                $row->person_name
-            ));
         }
 
         if (!empty($row->signature)) {
@@ -506,6 +485,11 @@ class ReportingDamageReportService
         $row->signature = $base64;
         $row->signed_by = $signer->id;
         $row->signed_at = now();
+        // Audit trail
+        if (in_array('signed_by_name', $row->getFillable(), true) || array_key_exists('signed_by_name', $row->getAttributes())) {
+            $row->signed_by_name = $signer->name;
+            $row->signed_by_role = $signer->role;
+        }
         $row->save();
     }
 

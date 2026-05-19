@@ -26,6 +26,8 @@ class ReportingDamageRepairer extends Model
         'signature',
         'signed_by',
         'signed_at',
+        'signed_by_name',
+        'signed_by_role',
         'sort_order',
     ];
 

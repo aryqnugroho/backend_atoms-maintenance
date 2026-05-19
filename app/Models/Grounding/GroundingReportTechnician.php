@@ -21,6 +21,8 @@ class GroundingReportTechnician extends Model
         'technician_signature',
         'technician_signed_by',
         'technician_signed_at',
+        'technician_signed_by_name',
+        'technician_signed_by_role',
         'sort_order',
     ];
 

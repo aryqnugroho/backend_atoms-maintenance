@@ -53,6 +53,8 @@ class ReportingDamageReport extends Model
         'manager_signature',
         'manager_signed_by',
         'manager_signed_at',
+        'manager_signed_by_name',
+        'manager_signed_by_role',
         'created_by_id',
         'created_by_name',
     ];

@@ -10,6 +10,7 @@ trait HasSignature
 {
     /**
      * Save an immutable base64 PNG signature for a role.
+     * Now supports role-based delegation via SignatureAuthorizationService.
      */
     public function saveSignature(string $role, string $base64, int $userId): void
     {
@@ -34,6 +35,28 @@ trait HasSignature
             throw new InvalidArgumentException('Signer user was not found.');
         }
 
+        // ─── Role-Based Delegation Authorization ───────────────
+        $slotType = \App\Services\SignatureAuthorizationService::slotType($role);
+        $targetId = null;
+        $targetName = null;
+
+        // Resolve target ID and name from the record columns
+        if (!empty($columns['name'])) {
+            $targetName = $this->{$columns['name']} ?? null;
+        }
+        // Try to find target ID column (convention: replace _name with _id or _signed_by with _id)
+        $nameCol = $columns['name'] ?? '';
+        $idCol = str_replace('_name', '_id', $nameCol);
+        if ($idCol !== $nameCol && $this->hasAttributeColumn($idCol)) {
+            $targetId = $this->{$idCol} ?? null;
+            if ($targetId !== null) {
+                $targetId = (int) $targetId;
+            }
+        }
+
+        \App\Services\SignatureAuthorizationService::authorize($user, $slotType, $targetId, $targetName);
+
+        // ─── Save signature ────────────────────────────────────
         $this->{$signatureColumn} = $base64;
 
         if (!empty($columns['signed_at'])) {
@@ -46,6 +69,19 @@ trait HasSignature
 
         if (!empty($columns['name']) && empty($this->{$columns['name']})) {
             $this->{$columns['name']} = $user->name;
+        }
+
+        // ─── Audit trail: record actual signer info ────────────
+        // Convention: {prefix}_signed_by_name, {prefix}_signed_by_role
+        $prefix = $this->getSignatureColumnPrefix($role, $columns);
+        $signedByNameCol = $prefix . '_signed_by_name';
+        $signedByRoleCol = $prefix . '_signed_by_role';
+
+        if ($this->hasAttributeColumn($signedByNameCol)) {
+            $this->{$signedByNameCol} = $user->name;
+        }
+        if ($this->hasAttributeColumn($signedByRoleCol)) {
+            $this->{$signedByRoleCol} = $user->role;
         }
 
         if (method_exists($this, 'beforeSignatureStatusRecalculated')) {
@@ -220,5 +256,22 @@ trait HasSignature
     {
         return array_key_exists($column, $this->getAttributes()) ||
             in_array($column, $this->getFillable(), true);
+    }
+
+    /**
+     * Derive the column prefix for audit trail fields from the role map.
+     * E.g. role 'mt' with signature column 'mt_signature' → prefix 'mt'
+     *      role 'manager' with signature column 'manager_signature' → prefix 'manager'
+     */
+    protected function getSignatureColumnPrefix(string $role, array $columns): string
+    {
+        // Try to derive from the signature column name
+        $sigCol = $columns['signature'] ?? '';
+        $suffix = '_signature';
+        if (str_ends_with($sigCol, $suffix)) {
+            return substr($sigCol, 0, -strlen($suffix));
+        }
+        // Fallback to role key
+        return $role;
     }
 }
