@@ -6,18 +6,17 @@ use App\Models\LocalUser;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
-use Illuminate\Database\Eloquent\SoftDeletes;
 
 /**
  * LogbookTfp — header logbook harian TFP.
  * Satu record per tanggal (unique constraint on `date`).
  *
- * Signature: Manager Teknik menandatangani logbook harian.
- * Menggunakan role-based delegation (SignatureAuthorizationService).
+ * Menggunakan hard delete (bukan soft delete) agar unique constraint `date`
+ * benar-benar dibebaskan saat logbook dihapus, sehingga tanggal yang sama
+ * bisa dipakai kembali.
  */
 class LogbookTfp extends Model
 {
-    use SoftDeletes;
 
     protected $table = 'logbook_tfps';
 

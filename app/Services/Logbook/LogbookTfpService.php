@@ -307,6 +307,7 @@ class LogbookTfpService
         if (!empty($logbook->manager_signature)) {
             throw new RuntimeException('Logbook yang sudah ditandatangani tidak dapat dihapus.');
         }
+        // Hard delete — removes the row completely so the date can be reused
         $logbook->delete();
     }
 
