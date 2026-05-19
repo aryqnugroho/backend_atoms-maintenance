@@ -1,0 +1,20 @@
+<?php
+
+namespace App\Exceptions;
+
+use App\Models\Cnsd\CnsdGlidepathMeterRecord;
+use RuntimeException;
+
+class CnsdGlidepathMeterDuplicateException extends RuntimeException
+{
+    public function __construct(
+        public readonly CnsdGlidepathMeterRecord $existingRecord,
+    ) {
+        parent::__construct(
+            'Form Glide Path Meter Reading untuk tanggal '
+            . $existingRecord->date?->format('Y-m-d')
+            . ' shift ' . $existingRecord->shift_type
+            . ' sudah ada (Form #' . $existingRecord->form_number . ').'
+        );
+    }
+}

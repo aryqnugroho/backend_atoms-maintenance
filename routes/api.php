@@ -11,6 +11,7 @@ use App\Http\Controllers\Api\V1\Cnsd\CnsdRecorderMeterController;
 use App\Http\Controllers\Api\V1\Cnsd\CnsdAmscMeterController;
 use App\Http\Controllers\Api\V1\Cnsd\CnsdTransmitterMeterController;
 use App\Http\Controllers\Api\V1\Cnsd\CnsdReceiverMeterController;
+use App\Http\Controllers\Api\V1\Cnsd\CnsdGlidepathMeterController;
 use App\Http\Controllers\Api\V1\Tfp\TfpAobGroundController;
 use App\Http\Controllers\Api\V1\Tfp\TfpAobLt12Controller;
 use App\Http\Controllers\Api\V1\Tfp\TfpTransmitterTxController;
@@ -169,6 +170,21 @@ Route::prefix('v1')->group(function () {
             Route::delete('/{id}', [CnsdReceiverMeterController::class, 'destroy'])
                 ->whereNumber('id')
                 ->middleware('role:Admin,Manager Teknik');
+        });
+
+        // ─── CNSD Glide Path Meter Reading (Form GLIDEPATH-METER / ILS-GP) ───
+        // Seventh CNSD module — "Meter Reading Glide Path".
+        Route::prefix('cnsd/glidepath-meter')->group(function () {
+            Route::get('/template', [CnsdGlidepathMeterController::class, 'template']);
+            Route::get('/years',    [CnsdGlidepathMeterController::class, 'years']);
+            Route::get('/',         [CnsdGlidepathMeterController::class, 'index']);
+            Route::post('/', [CnsdGlidepathMeterController::class, 'store'])
+                ->middleware('role:Admin,Manager Teknik,Supervisor CNSD,Teknisi CNSD');
+            Route::get('/{id}',       [CnsdGlidepathMeterController::class, 'show'])->whereNumber('id');
+            Route::put('/{id}',       [CnsdGlidepathMeterController::class, 'update'])->whereNumber('id');
+            Route::post('/{id}/sign', [CnsdGlidepathMeterController::class, 'sign'])->whereNumber('id');
+            Route::delete('/{id}',    [CnsdGlidepathMeterController::class, 'destroy'])
+                ->whereNumber('id')->middleware('role:Admin,Manager Teknik');
         });
 
         // ─── TFP Performance Check AOB Lantai Ground ───────────
