@@ -311,6 +311,13 @@ class GroundCheckAdcService
                 }
             }
 
+            // Editable timestamp — pakai value dari payload bila ada (override
+            // manual oleh teknisi), kalau tidak biarkan apa adanya.
+            $timeProvided = array_key_exists('time_filled', $data);
+            if ($timeProvided && is_string($data['time_filled']) && $data['time_filled'] !== '') {
+                $record->time_filled = $data['time_filled'];
+            }
+
             // Update items
             if (!empty($data['items']) && is_array($data['items'])) {
                 $existing = $record->items()->get()->keyBy('id');
@@ -329,6 +336,8 @@ class GroundCheckAdcService
                     }
 
                     $allowed = [
+                        'calibration_result',
+                        'tolerance',
                         'tx1_hasil_pd',
                         'tx1_in_tolerance',
                         'tx1_out_of_tolerance',
@@ -343,8 +352,12 @@ class GroundCheckAdcService
                 }
             }
 
-            // Refresh time_filled
-            $record->time_filled = now()->format('H:i');
+            // Fallback: kalau time_filled belum diset (record baru tanpa override
+            // manual), isi dengan current time. Kalau user sudah edit manual,
+            // jangan ditimpa.
+            if (!$timeProvided && empty($record->time_filled)) {
+                $record->time_filled = now()->format('H:i');
+            }
             $record->save();
 
             return $record->fresh([
