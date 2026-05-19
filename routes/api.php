@@ -14,6 +14,7 @@ use App\Http\Controllers\Api\V1\Cnsd\CnsdReceiverMeterController;
 use App\Http\Controllers\Api\V1\Cnsd\CnsdGlidepathMeterController;
 use App\Http\Controllers\Api\V1\Cnsd\CnsdLocalizerMeterController;
 use App\Http\Controllers\Api\V1\Cnsd\CnsdTdmeMeterController;
+use App\Http\Controllers\Api\V1\Cnsd\CnsdDvorMeterController;
 use App\Http\Controllers\Api\V1\Tfp\TfpAobGroundController;
 use App\Http\Controllers\Api\V1\Tfp\TfpAobLt12Controller;
 use App\Http\Controllers\Api\V1\Tfp\TfpTransmitterTxController;
@@ -218,6 +219,21 @@ Route::prefix('v1')->group(function () {
             Route::put('/{id}',       [CnsdTdmeMeterController::class, 'update'])->whereNumber('id');
             Route::post('/{id}/sign', [CnsdTdmeMeterController::class, 'sign'])->whereNumber('id');
             Route::delete('/{id}',    [CnsdTdmeMeterController::class, 'destroy'])
+                ->whereNumber('id')->middleware('role:Admin,Manager Teknik');
+        });
+
+        // ─── CNSD DVOR Meter Reading (Form DVOR-METER / FORM N-5) ───
+        // Tenth CNSD module — "Meter Reading DVOR".
+        Route::prefix('cnsd/dvor-meter')->group(function () {
+            Route::get('/template', [CnsdDvorMeterController::class, 'template']);
+            Route::get('/years',    [CnsdDvorMeterController::class, 'years']);
+            Route::get('/',         [CnsdDvorMeterController::class, 'index']);
+            Route::post('/', [CnsdDvorMeterController::class, 'store'])
+                ->middleware('role:Admin,Manager Teknik,Supervisor CNSD,Teknisi CNSD');
+            Route::get('/{id}',       [CnsdDvorMeterController::class, 'show'])->whereNumber('id');
+            Route::put('/{id}',       [CnsdDvorMeterController::class, 'update'])->whereNumber('id');
+            Route::post('/{id}/sign', [CnsdDvorMeterController::class, 'sign'])->whereNumber('id');
+            Route::delete('/{id}',    [CnsdDvorMeterController::class, 'destroy'])
                 ->whereNumber('id')->middleware('role:Admin,Manager Teknik');
         });
 
