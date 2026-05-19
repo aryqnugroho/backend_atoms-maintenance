@@ -484,24 +484,15 @@ class TfpAobLt12Service
             );
         }
 
-        $roleOk = match ($role) {
-            'manager'    => $signer->isManager(),
-            'supervisor' => $signer->isSupervisorTfp() || $signer->isSupervisor(),
-            default      => false,
+        // Use centralized role-based delegation authorization
+        $slotType = \App\Services\SignatureAuthorizationService::slotType($role);
+        $targetId = match ($role) {
+            'manager'    => $record->manager_id ? (int) $record->manager_id : null,
+            'supervisor' => $record->supervisor_id ? (int) $record->supervisor_id : null,
+            default      => null,
         };
-        if (!$roleOk) {
-            throw new SignerNotAuthorizedException(sprintf(
-                'Hanya %s yang berhak menandatangani role ini.',
-                $role === 'manager' ? 'Manager Teknik' : 'Supervisor TFP'
-            ));
-        }
 
-        if (!WorkOrderService::namesMatch($expectedName, $signer->name)) {
-            throw new SignerNotAuthorizedException(sprintf(
-                'Tanda tangan hanya dapat dilakukan oleh %s. Tidak boleh diwakilkan.',
-                $expectedName
-            ));
-        }
+        \App\Services\SignatureAuthorizationService::authorize($signer, $slotType, $targetId, $expectedName);
 
         // Use the trait — it enforces immutability + base64 PNG validation.
         $record->saveSignature($role, $base64, $signer->id);
@@ -513,9 +504,8 @@ class TfpAobLt12Service
         LocalUser $signer,
         ?int $technicianRowId,
     ): void {
-        if (!$signer->isTeknisi() && !$signer->isSupervisorTfp()) {
-            throw new SignerNotAuthorizedException('Hanya teknisi TFP yang berhak menandatangani role ini.');
-        }
+        // Use role-based delegation: Manager/Supervisor/Technician can all sign technician slots
+        \App\Services\SignatureAuthorizationService::authorize($signer, 'technician', null, null);
 
         /** @var TfpAobLt12Technician|null $row */
         $row = null;
@@ -532,16 +522,14 @@ class TfpAobLt12Service
         }
 
         if (!$row) {
-            throw new SignerNotAuthorizedException(
-                'Anda bukan bagian dari teknisi TFP yang bertugas di shift ini, sehingga tidak dapat menandatangani.'
-            );
+            // For delegation: pick first unsigned row
+            $row = $record->technicians()->whereNull('technician_signature')->first();
         }
 
-        if (!WorkOrderService::namesMatch($row->technician_name, $signer->name)) {
-            throw new SignerNotAuthorizedException(sprintf(
-                'Tanda tangan hanya dapat dilakukan oleh %s. Tidak boleh diwakilkan.',
-                $row->technician_name
-            ));
+        if (!$row) {
+            throw new SignerNotAuthorizedException(
+                'Tidak ada slot teknisi yang tersedia untuk ditandatangani pada form ini.'
+            );
         }
 
         if (!empty($row->technician_signature)) {
@@ -553,6 +541,11 @@ class TfpAobLt12Service
         $row->technician_signature = $base64;
         $row->technician_signed_by = $signer->id;
         $row->technician_signed_at = now();
+        // Audit trail
+        if (in_array('technician_signed_by_name', $row->getFillable(), true) || array_key_exists('technician_signed_by_name', $row->getAttributes())) {
+            $row->technician_signed_by_name = $signer->name;
+            $row->technician_signed_by_role = $signer->role;
+        }
         $row->save();
     }
 

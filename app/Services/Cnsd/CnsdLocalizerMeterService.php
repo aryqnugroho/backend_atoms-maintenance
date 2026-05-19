@@ -218,14 +218,23 @@ class CnsdLocalizerMeterService
     private function signRecordRole(CnsdLocalizerMeterRecord $record, string $role, string $base64, LocalUser $signer): void
     {
         $map = [
-            'manager'    => ['check' => fn ($u) => $u->isManager(),                              'name_col' => 'manager_name',    'sig_col' => 'manager_signature',    'by_col' => 'manager_signed_by',    'at_col' => 'manager_signed_at'],
-            'supervisor' => ['check' => fn ($u) => $u->isSupervisor() || $u->isSupervisorCnsd(), 'name_col' => 'supervisor_name', 'sig_col' => 'supervisor_signature', 'by_col' => 'supervisor_signed_by', 'at_col' => 'supervisor_signed_at'],
+            'manager'    => ['name_col' => 'manager_name',    'sig_col' => 'manager_signature',    'by_col' => 'manager_signed_by',    'at_col' => 'manager_signed_at'],
+            'supervisor' => ['name_col' => 'supervisor_name', 'sig_col' => 'supervisor_signature', 'by_col' => 'supervisor_signed_by', 'at_col' => 'supervisor_signed_at'],
         ];
         if (!isset($map[$role])) throw new \InvalidArgumentException("Role '$role' tidak valid.");
         $cfg = $map[$role];
-        if (!($cfg['check'])($signer)) throw new SignerNotAuthorizedException("Anda tidak memiliki role yang sesuai untuk menandatangani sebagai $role.");
         $expectedName = $record->{$cfg['name_col']};
-        if (!$expectedName || !WorkOrderService::namesMatch($expectedName, $signer->name)) throw new SignerNotAuthorizedException("Nama Anda tidak cocok dengan $role yang tercatat pada form ini.");
+
+        // Use centralized role-based delegation authorization
+        $slotType = \App\Services\SignatureAuthorizationService::slotType($role);
+        $targetId = match ($role) {
+            'manager'    => $record->manager_id ? (int) $record->manager_id : null,
+            'supervisor' => $record->supervisor_id ? (int) $record->supervisor_id : null,
+            default      => null,
+        };
+
+        \App\Services\SignatureAuthorizationService::authorize($signer, $slotType, $targetId, $expectedName);
+
         if (!empty($record->{$cfg['sig_col']})) throw new RuntimeException("Tanda tangan $role sudah ada dan tidak dapat diubah.");
         $record->{$cfg['sig_col']} = $base64;
         $record->{$cfg['by_col']}  = $signer->id;
@@ -235,16 +244,26 @@ class CnsdLocalizerMeterService
 
     private function signTechnicianRow(CnsdLocalizerMeterRecord $record, string $base64, LocalUser $signer, ?int $techRowId): void
     {
-        if (!$signer->isTeknisi() && !$signer->isTeknisiCnsd()) throw new SignerNotAuthorizedException('Anda tidak memiliki role Teknisi CNSD.');
+        // Use role-based delegation: Manager/Supervisor/Technician can all sign technician slots
+        \App\Services\SignatureAuthorizationService::authorize($signer, 'technician', null, null);
+
         $row = $techRowId ? $record->technicians()->find($techRowId) : null;
         if (!$row) $row = $record->technicians()->where('technician_id', $signer->id)->first();
         if (!$row) $row = $record->technicians->first(fn ($t) => WorkOrderService::namesMatch($t->technician_name, $signer->name));
-        if (!$row) throw new SignerNotAuthorizedException('Nama Anda tidak terdaftar sebagai teknisi pada form ini.');
-        if (!WorkOrderService::namesMatch($row->technician_name, $signer->name)) throw new SignerNotAuthorizedException('Nama Anda tidak cocok dengan baris teknisi yang dituju.');
+        if (!$row) {
+            // For delegation: pick first unsigned row
+            $row = $record->technicians()->whereNull('technician_signature')->first();
+        }
+        if (!$row) throw new SignerNotAuthorizedException('Tidak ada slot teknisi yang tersedia untuk ditandatangani pada form ini.');
         if (!empty($row->technician_signature)) throw new RuntimeException('Baris teknisi ini sudah ditandatangani dan tidak dapat diubah.');
         $row->technician_signature = $base64;
         $row->technician_signed_by = $signer->id;
         $row->technician_signed_at = now();
+        // Audit trail
+        if (in_array('technician_signed_by_name', $row->getFillable(), true) || array_key_exists('technician_signed_by_name', $row->getAttributes())) {
+            $row->technician_signed_by_name = $signer->name;
+            $row->technician_signed_by_role = $signer->role;
+        }
         $row->save();
     }
 

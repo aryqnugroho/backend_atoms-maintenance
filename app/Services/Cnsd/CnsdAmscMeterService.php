@@ -329,8 +329,8 @@ class CnsdAmscMeterService
         LocalUser $signer,
     ): void {
         $roleMap = [
-            'manager'    => ['check' => fn ($u) => $u->isManager(), 'name_col' => 'manager_name', 'sig_col' => 'manager_signature', 'by_col' => 'manager_signed_by', 'at_col' => 'manager_signed_at'],
-            'supervisor' => ['check' => fn ($u) => $u->isSupervisor() || $u->isSupervisorCnsd(), 'name_col' => 'supervisor_name', 'sig_col' => 'supervisor_signature', 'by_col' => 'supervisor_signed_by', 'at_col' => 'supervisor_signed_at'],
+            'manager'    => ['name_col' => 'manager_name', 'sig_col' => 'manager_signature', 'by_col' => 'manager_signed_by', 'at_col' => 'manager_signed_at'],
+            'supervisor' => ['name_col' => 'supervisor_name', 'sig_col' => 'supervisor_signature', 'by_col' => 'supervisor_signed_by', 'at_col' => 'supervisor_signed_at'],
         ];
 
         if (!isset($roleMap[$role])) {
@@ -338,17 +338,17 @@ class CnsdAmscMeterService
         }
 
         $config = $roleMap[$role];
-
-        // Role check
-        if (!($config['check'])($signer)) {
-            throw new SignerNotAuthorizedException("Anda tidak memiliki role yang sesuai untuk menandatangani sebagai $role.");
-        }
-
-        // Name match
         $expectedName = $record->{$config['name_col']};
-        if (!$expectedName || !WorkOrderService::namesMatch($expectedName, $signer->name)) {
-            throw new SignerNotAuthorizedException("Nama Anda tidak cocok dengan $role yang tercatat pada form ini.");
-        }
+
+        // Use centralized role-based delegation authorization
+        $slotType = \App\Services\SignatureAuthorizationService::slotType($role);
+        $targetId = match ($role) {
+            'manager'    => $record->manager_id ? (int) $record->manager_id : null,
+            'supervisor' => $record->supervisor_id ? (int) $record->supervisor_id : null,
+            default      => null,
+        };
+
+        \App\Services\SignatureAuthorizationService::authorize($signer, $slotType, $targetId, $expectedName);
 
         // Immutable check
         if (!empty($record->{$config['sig_col']})) {
@@ -367,10 +367,8 @@ class CnsdAmscMeterService
         LocalUser $signer,
         ?int $technicianRowId,
     ): void {
-        // Must be a technician
-        if (!$signer->isTeknisi() && !$signer->isTeknisiCnsd()) {
-            throw new SignerNotAuthorizedException('Anda tidak memiliki role Teknisi CNSD.');
-        }
+        // Use role-based delegation: Manager/Supervisor/Technician can all sign technician slots
+        \App\Services\SignatureAuthorizationService::authorize($signer, 'technician', null, null);
 
         // Find the row
         $row = null;
@@ -391,12 +389,14 @@ class CnsdAmscMeterService
         }
 
         if (!$row) {
-            throw new SignerNotAuthorizedException('Nama Anda tidak terdaftar sebagai teknisi pada form ini.');
+            // For delegation: pick first unsigned row
+            $row = $record->technicians()->whereNull('technician_signature')->first();
         }
 
-        // Name match validation
-        if (!WorkOrderService::namesMatch($row->technician_name, $signer->name)) {
-            throw new SignerNotAuthorizedException('Nama Anda tidak cocok dengan baris teknisi yang dituju.');
+        if (!$row) {
+            throw new SignerNotAuthorizedException(
+                'Tidak ada slot teknisi yang tersedia untuk ditandatangani pada form ini.'
+            );
         }
 
         // Immutable
@@ -407,6 +407,11 @@ class CnsdAmscMeterService
         $row->technician_signature = $base64Signature;
         $row->technician_signed_by = $signer->id;
         $row->technician_signed_at = now();
+        // Audit trail
+        if (in_array('technician_signed_by_name', $row->getFillable(), true) || array_key_exists('technician_signed_by_name', $row->getAttributes())) {
+            $row->technician_signed_by_name = $signer->name;
+            $row->technician_signed_by_role = $signer->role;
+        }
         $row->save();
     }
 

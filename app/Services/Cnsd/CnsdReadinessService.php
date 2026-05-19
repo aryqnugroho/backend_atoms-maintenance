@@ -402,25 +402,15 @@ class CnsdReadinessService
             );
         }
 
-        // Role check
-        $roleOk = match ($role) {
-            'manager'    => $signer->isManager(),
-            'supervisor' => $signer->isSupervisorCnsd() || $signer->isSupervisor(),
-            default      => false,
+        // Use centralized role-based delegation authorization
+        $slotType = \App\Services\SignatureAuthorizationService::slotType($role);
+        $targetId = match ($role) {
+            'manager'    => $record->manager_id ? (int) $record->manager_id : null,
+            'supervisor' => $record->supervisor_id ? (int) $record->supervisor_id : null,
+            default      => null,
         };
-        if (!$roleOk) {
-            throw new SignerNotAuthorizedException(sprintf(
-                'Hanya %s yang berhak menandatangani role ini.',
-                $role === 'manager' ? 'Manager Teknik' : 'Supervisor CNSD'
-            ));
-        }
 
-        if (!WorkOrderService::namesMatch($expectedName, $signer->name)) {
-            throw new SignerNotAuthorizedException(sprintf(
-                'Tanda tangan hanya dapat dilakukan oleh %s. Tidak boleh diwakilkan.',
-                $expectedName
-            ));
-        }
+        \App\Services\SignatureAuthorizationService::authorize($signer, $slotType, $targetId, $expectedName);
 
         // Use the trait — it enforces immutability + base64 PNG validation.
         $record->saveSignature($role, $base64, $signer->id);
@@ -435,10 +425,8 @@ class CnsdReadinessService
         LocalUser $signer,
         ?int $technicianRowId,
     ): void {
-        if (!$signer->isTeknisi() && !$signer->isSupervisorCnsd()) {
-            // Supervisor CNSD also appears in the technician list — they sign as a technician.
-            throw new SignerNotAuthorizedException('Hanya teknisi CNSD yang berhak menandatangani role ini.');
-        }
+        // Use role-based delegation: Manager/Supervisor/Technician can all sign technician slots
+        \App\Services\SignatureAuthorizationService::authorize($signer, 'technician', null, null);
 
         // Resolve technician row — prefer explicit row id, fall back to ID match,
         // then to name match.
@@ -458,16 +446,14 @@ class CnsdReadinessService
         }
 
         if (!$row) {
-            throw new SignerNotAuthorizedException(
-                'Anda bukan bagian dari teknisi CNSD yang bertugas di shift ini, sehingga tidak dapat menandatangani.'
-            );
+            // For delegation: pick first unsigned row
+            $row = $record->technicians()->whereNull('technician_signature')->first();
         }
 
-        if (!WorkOrderService::namesMatch($row->technician_name, $signer->name)) {
-            throw new SignerNotAuthorizedException(sprintf(
-                'Tanda tangan hanya dapat dilakukan oleh %s. Tidak boleh diwakilkan.',
-                $row->technician_name
-            ));
+        if (!$row) {
+            throw new SignerNotAuthorizedException(
+                'Tidak ada slot teknisi yang tersedia untuk ditandatangani pada form ini.'
+            );
         }
 
         if (!empty($row->technician_signature)) {
@@ -479,6 +465,11 @@ class CnsdReadinessService
         $row->technician_signature = $base64;
         $row->technician_signed_by = $signer->id;
         $row->technician_signed_at = now();
+        // Audit trail
+        if (in_array('technician_signed_by_name', $row->getFillable(), true) || array_key_exists('technician_signed_by_name', $row->getAttributes())) {
+            $row->technician_signed_by_name = $signer->name;
+            $row->technician_signed_by_role = $signer->role;
+        }
         $row->save();
     }
 
