@@ -384,6 +384,10 @@ Route::prefix('v1')->group(function () {
             Route::get('/{id}',     [GroundCheckAdcController::class, 'show'])->whereNumber('id');
             Route::put('/{id}',     [GroundCheckAdcController::class, 'update'])->whereNumber('id');
             Route::post('/{id}/sign', [GroundCheckAdcController::class, 'sign'])->whereNumber('id');
+            // Photo documentation
+            Route::post('/{id}/photos', [GroundCheckAdcController::class, 'uploadPhoto'])->whereNumber('id');
+            Route::put('/{id}/photos/{photoId}', [GroundCheckAdcController::class, 'updatePhoto'])->whereNumber('id')->whereNumber('photoId');
+            Route::delete('/{id}/photos/{photoId}', [GroundCheckAdcController::class, 'deletePhoto'])->whereNumber('id')->whereNumber('photoId');
             Route::delete('/{id}', [GroundCheckAdcController::class, 'destroy'])
                 ->whereNumber('id')
                 ->middleware('role:Admin,Manager Teknik');

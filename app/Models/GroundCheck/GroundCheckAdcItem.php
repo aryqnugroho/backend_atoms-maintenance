@@ -14,6 +14,7 @@ class GroundCheckAdcItem extends Model
         'section_name',
         'item_code',
         'parameter_name',
+        'input_type',
         'calibration_result',
         'tolerance',
         'tx1_hasil_pd',

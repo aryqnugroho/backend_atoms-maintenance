@@ -64,6 +64,13 @@ class GroundCheckAdcRecord extends Model
             ->orderBy('sort_order');
     }
 
+    public function photos(): HasMany
+    {
+        return $this->hasMany(GroundCheckAdcPhoto::class, 'ground_check_adc_record_id')
+            ->orderBy('sort_order')
+            ->orderBy('id');
+    }
+
     public function manager(): BelongsTo
     {
         return $this->belongsTo(LocalUser::class, 'manager_id');

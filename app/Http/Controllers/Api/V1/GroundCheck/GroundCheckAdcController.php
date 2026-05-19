@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\GroundCheck\CreateGroundCheckAdcRequest;
 use App\Http\Requests\GroundCheck\SignGroundCheckAdcRequest;
 use App\Http\Requests\GroundCheck\UpdateGroundCheckAdcRequest;
+use App\Models\GroundCheck\GroundCheckAdcPhoto;
 use App\Models\GroundCheck\GroundCheckAdcRecord;
 use App\Services\GroundCheck\GroundCheckAdcService;
 use App\Services\GroundCheck\GroundCheckAdcTemplate;
@@ -299,6 +300,7 @@ class GroundCheckAdcController extends Controller
                 'section_name'          => $i->section_name,
                 'item_code'             => $i->item_code,
                 'parameter_name'        => $i->parameter_name,
+                'input_type'            => $i->input_type ?? 'text',
                 'calibration_result'    => $i->calibration_result,
                 'tolerance'             => $i->tolerance,
                 'tx1_hasil_pd'          => $i->tx1_hasil_pd,
@@ -311,8 +313,120 @@ class GroundCheckAdcController extends Controller
                 'is_header'             => $i->is_header,
                 'sort_order'            => $i->sort_order,
             ])->toArray(),
+            'photos'               => $record->photos->map(fn (GroundCheckAdcPhoto $p) => [
+                'id'              => $p->id,
+                'url'             => $p->url,
+                'caption'         => $p->caption,
+                'original_name'   => $p->original_name,
+                'mime_type'       => $p->mime_type,
+                'size_bytes'      => $p->size_bytes,
+                'uploaded_by_id'  => $p->uploaded_by_id,
+                'uploaded_by_name' => $p->uploaded_by_name,
+                'sort_order'      => $p->sort_order,
+                'uploaded_at'     => $p->created_at?->toISOString(),
+            ])->values()->toArray(),
             'created_at'           => $record->created_at?->toISOString(),
             'updated_at'           => $record->updated_at?->toISOString(),
         ];
+    }
+
+    // ─── Photos ────────────────────────────────────────────────
+
+    /**
+     * POST /api/v1/ground-check/adc/{id}/photos
+     * Multipart form: photo (file), caption (string, optional)
+     */
+    public function uploadPhoto(Request $request, int $id): JsonResponse
+    {
+        $record = GroundCheckAdcRecord::with('photos')->find($id);
+        if (!$record) {
+            return response()->json(['success' => false, 'message' => 'Record tidak ditemukan.'], 404);
+        }
+
+        if ($record->status === 'completed') {
+            return response()->json([
+                'success' => false,
+                'message' => 'Form sudah selesai ditandatangani, foto tidak dapat ditambahkan.',
+            ], 409);
+        }
+
+        $validated = $request->validate([
+            'photo'   => ['required', 'file', 'image', 'max:8192'], // max 8 MB
+            'caption' => ['nullable', 'string', 'max:255'],
+        ]);
+
+        $user = $request->attributes->get('auth_user');
+
+        try {
+            $this->service->addPhoto($record, $validated['photo'], $validated['caption'] ?? null, $user);
+        } catch (\RuntimeException $e) {
+            return response()->json(['success' => false, 'message' => $e->getMessage()], 422);
+        }
+
+        $record->load(['photos', 'items', 'technicians', 'manager', 'supervisor']);
+        return response()->json([
+            'success' => true,
+            'message' => 'Foto berhasil diunggah.',
+            'data'    => $this->formatDetail($record),
+        ], 201);
+    }
+
+    /**
+     * PUT /api/v1/ground-check/adc/{id}/photos/{photoId}
+     * Update only the caption.
+     */
+    public function updatePhoto(Request $request, int $id, int $photoId): JsonResponse
+    {
+        $record = GroundCheckAdcRecord::find($id);
+        if (!$record) {
+            return response()->json(['success' => false, 'message' => 'Record tidak ditemukan.'], 404);
+        }
+        $photo = GroundCheckAdcPhoto::where('ground_check_adc_record_id', $id)->find($photoId);
+        if (!$photo) {
+            return response()->json(['success' => false, 'message' => 'Foto tidak ditemukan.'], 404);
+        }
+
+        $validated = $request->validate([
+            'caption' => ['nullable', 'string', 'max:255'],
+        ]);
+
+        $this->service->updatePhotoCaption($photo, $validated['caption'] ?? null);
+
+        $record->load(['photos', 'items', 'technicians', 'manager', 'supervisor']);
+        return response()->json([
+            'success' => true,
+            'message' => 'Caption foto diperbarui.',
+            'data'    => $this->formatDetail($record),
+        ]);
+    }
+
+    /**
+     * DELETE /api/v1/ground-check/adc/{id}/photos/{photoId}
+     */
+    public function deletePhoto(int $id, int $photoId): JsonResponse
+    {
+        $record = GroundCheckAdcRecord::find($id);
+        if (!$record) {
+            return response()->json(['success' => false, 'message' => 'Record tidak ditemukan.'], 404);
+        }
+        if ($record->status === 'completed') {
+            return response()->json([
+                'success' => false,
+                'message' => 'Form sudah selesai ditandatangani, foto tidak dapat dihapus.',
+            ], 409);
+        }
+        $photo = GroundCheckAdcPhoto::where('ground_check_adc_record_id', $id)->find($photoId);
+        if (!$photo) {
+            return response()->json(['success' => false, 'message' => 'Foto tidak ditemukan.'], 404);
+        }
+
+        $this->service->deletePhoto($photo);
+
+        $record->load(['photos', 'items', 'technicians', 'manager', 'supervisor']);
+        return response()->json([
+            'success' => true,
+            'message' => 'Foto dihapus.',
+            'data'    => $this->formatDetail($record),
+        ]);
     }
 }

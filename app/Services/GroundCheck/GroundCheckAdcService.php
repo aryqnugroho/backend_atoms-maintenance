@@ -4,6 +4,7 @@ namespace App\Services\GroundCheck;
 
 use App\Exceptions\SignerNotAuthorizedException;
 use App\Models\GroundCheck\GroundCheckAdcItem;
+use App\Models\GroundCheck\GroundCheckAdcPhoto;
 use App\Models\GroundCheck\GroundCheckAdcRecord;
 use App\Models\GroundCheck\GroundCheckAdcTechnician;
 use App\Models\LocalUser;
@@ -495,6 +496,62 @@ class GroundCheckAdcService
         $decoded = base64_decode($payload, true);
         if ($decoded === false || $decoded === '') {
             throw new InvalidArgumentException('Signature payload is not valid base64.');
+        }
+    }
+
+    // ─── Photos ────────────────────────────────────────────────
+
+    /**
+     * Store an uploaded photo for the given record.
+     * File goes to disk `public` at `ground-check/adc/{record_id}/<hash>.<ext>`.
+     */
+    public function addPhoto(
+        GroundCheckAdcRecord $record,
+        \Illuminate\Http\UploadedFile $file,
+        ?string $caption,
+        ?LocalUser $uploader,
+    ): GroundCheckAdcPhoto {
+        $dir = "ground-check/adc/{$record->id}";
+        $path = $file->store($dir, 'public');
+        if (!$path) {
+            throw new RuntimeException('Gagal menyimpan file foto.');
+        }
+
+        $nextSort = (int) $record->photos()->max('sort_order') + 1;
+
+        return GroundCheckAdcPhoto::create([
+            'ground_check_adc_record_id' => $record->id,
+            'path'             => $path,
+            'original_name'    => $file->getClientOriginalName(),
+            'caption'          => $caption,
+            'mime_type'        => $file->getMimeType(),
+            'size_bytes'       => $file->getSize() ?: 0,
+            'uploaded_by_id'   => $uploader?->id,
+            'uploaded_by_name' => $uploader?->name,
+            'sort_order'       => $nextSort,
+        ]);
+    }
+
+    public function updatePhotoCaption(GroundCheckAdcPhoto $photo, ?string $caption): GroundCheckAdcPhoto
+    {
+        $photo->caption = $caption;
+        $photo->save();
+        return $photo;
+    }
+
+    public function deletePhoto(GroundCheckAdcPhoto $photo): void
+    {
+        $path = $photo->path;
+        $photo->delete();
+        if ($path) {
+            try {
+                \Illuminate\Support\Facades\Storage::disk('public')->delete($path);
+            } catch (\Throwable $e) {
+                Log::warning('GroundCheckAdcService::deletePhoto failed removing file', [
+                    'path'  => $path,
+                    'error' => $e->getMessage(),
+                ]);
+            }
         }
     }
 
