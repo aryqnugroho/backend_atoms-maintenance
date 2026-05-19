@@ -12,6 +12,7 @@ use App\Http\Controllers\Api\V1\Cnsd\CnsdAmscMeterController;
 use App\Http\Controllers\Api\V1\Cnsd\CnsdTransmitterMeterController;
 use App\Http\Controllers\Api\V1\Cnsd\CnsdReceiverMeterController;
 use App\Http\Controllers\Api\V1\Cnsd\CnsdGlidepathMeterController;
+use App\Http\Controllers\Api\V1\Cnsd\CnsdLocalizerMeterController;
 use App\Http\Controllers\Api\V1\Tfp\TfpAobGroundController;
 use App\Http\Controllers\Api\V1\Tfp\TfpAobLt12Controller;
 use App\Http\Controllers\Api\V1\Tfp\TfpTransmitterTxController;
@@ -186,6 +187,21 @@ Route::prefix('v1')->group(function () {
             Route::put('/{id}',       [CnsdGlidepathMeterController::class, 'update'])->whereNumber('id');
             Route::post('/{id}/sign', [CnsdGlidepathMeterController::class, 'sign'])->whereNumber('id');
             Route::delete('/{id}',    [CnsdGlidepathMeterController::class, 'destroy'])
+                ->whereNumber('id')->middleware('role:Admin,Manager Teknik');
+        });
+
+        // ─── CNSD Localizer Meter Reading (Form LOCALIZER-METER / ILS-LLZ) ───
+        // Eighth CNSD module — "Meter Reading Localizer".
+        Route::prefix('cnsd/localizer-meter')->group(function () {
+            Route::get('/template', [CnsdLocalizerMeterController::class, 'template']);
+            Route::get('/years',    [CnsdLocalizerMeterController::class, 'years']);
+            Route::get('/',         [CnsdLocalizerMeterController::class, 'index']);
+            Route::post('/', [CnsdLocalizerMeterController::class, 'store'])
+                ->middleware('role:Admin,Manager Teknik,Supervisor CNSD,Teknisi CNSD');
+            Route::get('/{id}',       [CnsdLocalizerMeterController::class, 'show'])->whereNumber('id');
+            Route::put('/{id}',       [CnsdLocalizerMeterController::class, 'update'])->whereNumber('id');
+            Route::post('/{id}/sign', [CnsdLocalizerMeterController::class, 'sign'])->whereNumber('id');
+            Route::delete('/{id}',    [CnsdLocalizerMeterController::class, 'destroy'])
                 ->whereNumber('id')->middleware('role:Admin,Manager Teknik');
         });
 
