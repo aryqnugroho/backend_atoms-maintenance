@@ -19,6 +19,7 @@ use App\Http\Controllers\Api\V1\Tfp\TfpDvorController;
 use App\Http\Controllers\Api\V1\Tfp\TfpLocalizerController;
 use App\Http\Controllers\Api\V1\Tfp\TfpGlidepathController;
 use App\Http\Controllers\Api\V1\Grounding\GroundingReportController;
+use App\Http\Controllers\Api\V1\GroundCheck\GroundCheckAdcController;
 
 Route::prefix('v1')->group(function () {
     // ─── Public Auth Routes ────────────────────────────────────────────────
@@ -282,6 +283,21 @@ Route::prefix('v1')->group(function () {
             Route::put('/{id}',     [GroundingReportController::class, 'update'])->whereNumber('id');
             Route::post('/{id}/sign', [GroundingReportController::class, 'sign'])->whereNumber('id');
             Route::delete('/{id}', [GroundingReportController::class, 'destroy'])
+                ->whereNumber('id')
+                ->middleware('role:Admin,Manager Teknik');
+        });
+
+        // ─── Ground Check ADC ───────────────────────────────────────
+        Route::prefix('ground-check/adc')->group(function () {
+            Route::get('/template', [GroundCheckAdcController::class, 'template']);
+            Route::get('/years',    [GroundCheckAdcController::class, 'years']);
+            Route::get('/',         [GroundCheckAdcController::class, 'index']);
+            Route::post('/', [GroundCheckAdcController::class, 'store'])
+                ->middleware('role:Admin,Manager Teknik,Supervisor TFP,Teknisi TFP');
+            Route::get('/{id}',     [GroundCheckAdcController::class, 'show'])->whereNumber('id');
+            Route::put('/{id}',     [GroundCheckAdcController::class, 'update'])->whereNumber('id');
+            Route::post('/{id}/sign', [GroundCheckAdcController::class, 'sign'])->whereNumber('id');
+            Route::delete('/{id}', [GroundCheckAdcController::class, 'destroy'])
                 ->whereNumber('id')
                 ->middleware('role:Admin,Manager Teknik');
         });
