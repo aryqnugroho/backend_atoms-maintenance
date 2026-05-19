@@ -13,6 +13,7 @@ use App\Http\Controllers\Api\V1\Cnsd\CnsdTransmitterMeterController;
 use App\Http\Controllers\Api\V1\Cnsd\CnsdReceiverMeterController;
 use App\Http\Controllers\Api\V1\Cnsd\CnsdGlidepathMeterController;
 use App\Http\Controllers\Api\V1\Cnsd\CnsdLocalizerMeterController;
+use App\Http\Controllers\Api\V1\Cnsd\CnsdTdmeMeterController;
 use App\Http\Controllers\Api\V1\Tfp\TfpAobGroundController;
 use App\Http\Controllers\Api\V1\Tfp\TfpAobLt12Controller;
 use App\Http\Controllers\Api\V1\Tfp\TfpTransmitterTxController;
@@ -202,6 +203,21 @@ Route::prefix('v1')->group(function () {
             Route::put('/{id}',       [CnsdLocalizerMeterController::class, 'update'])->whereNumber('id');
             Route::post('/{id}/sign', [CnsdLocalizerMeterController::class, 'sign'])->whereNumber('id');
             Route::delete('/{id}',    [CnsdLocalizerMeterController::class, 'destroy'])
+                ->whereNumber('id')->middleware('role:Admin,Manager Teknik');
+        });
+
+        // ─── CNSD T-DME Meter Reading (Form TDME-METER / FORM N-5) ───
+        // Ninth CNSD module — "Meter Reading T-DME".
+        Route::prefix('cnsd/tdme-meter')->group(function () {
+            Route::get('/template', [CnsdTdmeMeterController::class, 'template']);
+            Route::get('/years',    [CnsdTdmeMeterController::class, 'years']);
+            Route::get('/',         [CnsdTdmeMeterController::class, 'index']);
+            Route::post('/', [CnsdTdmeMeterController::class, 'store'])
+                ->middleware('role:Admin,Manager Teknik,Supervisor CNSD,Teknisi CNSD');
+            Route::get('/{id}',       [CnsdTdmeMeterController::class, 'show'])->whereNumber('id');
+            Route::put('/{id}',       [CnsdTdmeMeterController::class, 'update'])->whereNumber('id');
+            Route::post('/{id}/sign', [CnsdTdmeMeterController::class, 'sign'])->whereNumber('id');
+            Route::delete('/{id}',    [CnsdTdmeMeterController::class, 'destroy'])
                 ->whereNumber('id')->middleware('role:Admin,Manager Teknik');
         });
 
