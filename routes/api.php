@@ -418,6 +418,9 @@ Route::prefix('v1')->group(function () {
             Route::post('/', [LogbookTfpController::class, 'store'])
                 ->middleware('role:Admin,Manager Teknik,Supervisor TFP,Teknisi TFP');
             Route::get('/{id}',       [LogbookTfpController::class, 'show'])->whereNumber('id');
+            Route::put('/{id}/items', [LogbookTfpController::class, 'updateItems'])->whereNumber('id');
+            Route::post('/{id}/notes', [LogbookTfpController::class, 'addNote'])->whereNumber('id');
+            Route::delete('/{id}/notes/{noteId}', [LogbookTfpController::class, 'deleteNote'])->whereNumber('id')->whereNumber('noteId');
             Route::post('/{id}/sign', [LogbookTfpController::class, 'sign'])->whereNumber('id');
             Route::delete('/{id}', [LogbookTfpController::class, 'destroy'])
                 ->whereNumber('id')

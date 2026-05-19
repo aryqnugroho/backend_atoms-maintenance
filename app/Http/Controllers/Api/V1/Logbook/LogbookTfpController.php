@@ -98,6 +98,99 @@ class LogbookTfpController extends Controller
     }
 
     /**
+     * PUT /api/v1/logbook/tfp/{id}/items
+     * Update S/US status for equipment items.
+     */
+    public function updateItems(Request $request, int $id): JsonResponse
+    {
+        $request->validate([
+            'items'              => ['required', 'array'],
+            'items.*.id'         => ['required', 'integer'],
+            'items.*.status_pagi'  => ['nullable', 'string', 'in:S,US'],
+            'items.*.status_siang' => ['nullable', 'string', 'in:S,US'],
+            'items.*.status_malam' => ['nullable', 'string', 'in:S,US'],
+        ]);
+
+        $logbook = LogbookTfp::find($id);
+        if (!$logbook) {
+            return $this->error('Logbook tidak ditemukan.', null, 404);
+        }
+
+        if (!empty($logbook->manager_signature)) {
+            return $this->error('Logbook yang sudah ditandatangani tidak dapat diubah.', null, 409);
+        }
+
+        try {
+            $logbook = $this->service->updateItems($logbook, $request->input('items'));
+        } catch (RuntimeException $e) {
+            return $this->error($e->getMessage(), null, 422);
+        }
+
+        $detail = $this->detail($logbook);
+        $detail['personnel_on_duty'] = $this->service->getPersonnelOnDuty($logbook->date->format('Y-m-d'));
+
+        return $this->success($detail, 'Items updated');
+    }
+
+    /**
+     * POST /api/v1/logbook/tfp/{id}/notes
+     * Add a timeline note.
+     */
+    public function addNote(Request $request, int $id): JsonResponse
+    {
+        $request->validate([
+            'shift'    => ['required', 'string', 'in:pagi,siang,malam'],
+            'time'     => ['nullable', 'string', 'max:10'],
+            'activity' => ['required', 'string', 'max:1000'],
+        ]);
+
+        $logbook = LogbookTfp::find($id);
+        if (!$logbook) {
+            return $this->error('Logbook tidak ditemukan.', null, 404);
+        }
+
+        $user = Auth::user();
+        if (!$user) {
+            return $this->error('Unauthenticated.', null, 401);
+        }
+
+        $logbook = $this->service->addNote(
+            $logbook,
+            $request->input('shift'),
+            $request->input('time'),
+            $request->input('activity'),
+            $user,
+        );
+
+        $detail = $this->detail($logbook);
+        $detail['personnel_on_duty'] = $this->service->getPersonnelOnDuty($logbook->date->format('Y-m-d'));
+
+        return $this->success($detail, 'Note added');
+    }
+
+    /**
+     * DELETE /api/v1/logbook/tfp/{id}/notes/{noteId}
+     */
+    public function deleteNote(int $id, int $noteId): JsonResponse
+    {
+        $logbook = LogbookTfp::find($id);
+        if (!$logbook) {
+            return $this->error('Logbook tidak ditemukan.', null, 404);
+        }
+
+        if (!empty($logbook->manager_signature)) {
+            return $this->error('Logbook yang sudah ditandatangani tidak dapat diubah.', null, 409);
+        }
+
+        $this->service->deleteNote($logbook, $noteId);
+
+        $detail = $this->detail($logbook->fresh(['items.equipment', 'notes', 'manager:id,name', 'creator:id,name']));
+        $detail['personnel_on_duty'] = $this->service->getPersonnelOnDuty($logbook->date->format('Y-m-d'));
+
+        return $this->success($detail, 'Note deleted');
+    }
+
+    /**
      * POST /api/v1/logbook/tfp/{id}/sign
      */
     public function sign(Request $request, int $id): JsonResponse

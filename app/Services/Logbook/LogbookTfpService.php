@@ -183,6 +183,73 @@ class LogbookTfpService
         return $result;
     }
 
+    // ─── Update Items ──────────────────────────────────────────
+
+    /**
+     * Update S/US status for equipment items.
+     */
+    public function updateItems(LogbookTfp $logbook, array $items): LogbookTfp
+    {
+        return DB::transaction(function () use ($logbook, $items) {
+            $existing = $logbook->items()->get()->keyBy('id');
+
+            foreach ($items as $payload) {
+                $item = $existing->get($payload['id'] ?? 0);
+                if (!$item) continue;
+
+                $item->fill([
+                    'status_pagi'  => $payload['status_pagi'] ?? null,
+                    'status_siang' => $payload['status_siang'] ?? null,
+                    'status_malam' => $payload['status_malam'] ?? null,
+                ]);
+                $item->save();
+            }
+
+            return $logbook->fresh(['items.equipment', 'notes', 'manager:id,name', 'creator:id,name']);
+        });
+    }
+
+    // ─── Notes ─────────────────────────────────────────────────
+
+    /**
+     * Add a timeline note to the logbook.
+     * The activity text is stored as-is; the caller (controller) passes the user
+     * so the service can append the reporter name.
+     */
+    public function addNote(
+        LogbookTfp $logbook,
+        string $shift,
+        ?string $time,
+        string $activity,
+        ?LocalUser $reporter = null,
+    ): LogbookTfp {
+        // Append reporter name to activity for audit trail
+        $activityWithReporter = $activity;
+        if ($reporter) {
+            $activityWithReporter = $activity . ' (oleh: ' . $reporter->name . ')';
+        }
+
+        $logbook->notes()->create([
+            'shift'    => $shift,
+            'time'     => $time,
+            'activity' => $activityWithReporter,
+        ]);
+
+        return $logbook->fresh(['items.equipment', 'notes', 'manager:id,name', 'creator:id,name']);
+    }
+
+    /**
+     * Delete a note from the logbook.
+     */
+    public function deleteNote(LogbookTfp $logbook, int $noteId): void
+    {
+        $note = $logbook->notes()->where('id', $noteId)->first();
+        if (!$note) {
+            throw new RuntimeException('Catatan tidak ditemukan.');
+        }
+        $note->delete();
+    }
+
     // ─── Sign ──────────────────────────────────────────────────
 
     /**
