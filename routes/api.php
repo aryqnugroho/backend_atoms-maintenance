@@ -28,6 +28,7 @@ use App\Http\Controllers\Api\V1\GroundCheck\GroundCheckAdcController;
 use App\Http\Controllers\Api\V1\Reporting\ReportingDamageReportController;
 use App\Http\Controllers\Api\V1\Reporting\ReportingPersonController;
 use App\Http\Controllers\Api\V1\Logbook\LogbookTfpController;
+use App\Http\Controllers\Api\V1\Logbook\LogbookCnsdController;
 
 Route::prefix('v1')->group(function () {
     // ─── Public Auth Routes ────────────────────────────────────────────────
@@ -426,6 +427,26 @@ Route::prefix('v1')->group(function () {
             Route::delete('/{id}/equipments/{itemId}', [LogbookTfpController::class, 'removeEquipment'])->whereNumber('id')->whereNumber('itemId');
             Route::post('/{id}/sign', [LogbookTfpController::class, 'sign'])->whereNumber('id');
             Route::delete('/{id}', [LogbookTfpController::class, 'destroy'])
+                ->whereNumber('id')
+                ->middleware('role:Admin,Manager Teknik');
+        });
+
+        // ─── Logbook CNSD ──────────────────────────────────────────
+        Route::prefix('logbook/cnsd')->group(function () {
+            Route::get('/years',      [LogbookCnsdController::class, 'years']);
+            Route::get('/equipments', [LogbookCnsdController::class, 'equipments']);
+            Route::get('/',           [LogbookCnsdController::class, 'index']);
+            Route::post('/', [LogbookCnsdController::class, 'store'])
+                ->middleware('role:Admin,Manager Teknik,Supervisor CNSD,Teknisi CNSD');
+            Route::get('/{id}',       [LogbookCnsdController::class, 'show'])->whereNumber('id');
+            Route::put('/{id}/items', [LogbookCnsdController::class, 'updateItems'])->whereNumber('id');
+            Route::post('/{id}/notes', [LogbookCnsdController::class, 'addNote'])->whereNumber('id');
+            Route::delete('/{id}/notes/{noteId}', [LogbookCnsdController::class, 'deleteNote'])->whereNumber('id')->whereNumber('noteId');
+            Route::post('/{id}/equipments', [LogbookCnsdController::class, 'addEquipment'])->whereNumber('id');
+            Route::put('/{id}/equipments/{itemId}', [LogbookCnsdController::class, 'editEquipment'])->whereNumber('id')->whereNumber('itemId');
+            Route::delete('/{id}/equipments/{itemId}', [LogbookCnsdController::class, 'removeEquipment'])->whereNumber('id')->whereNumber('itemId');
+            Route::post('/{id}/sign', [LogbookCnsdController::class, 'sign'])->whereNumber('id');
+            Route::delete('/{id}', [LogbookCnsdController::class, 'destroy'])
                 ->whereNumber('id')
                 ->middleware('role:Admin,Manager Teknik');
         });
