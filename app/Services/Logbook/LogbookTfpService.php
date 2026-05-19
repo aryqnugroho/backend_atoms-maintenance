@@ -99,43 +99,58 @@ class LogbookTfpService
      */
     public function createLogbook(string $date, ?LocalUser $creator = null): LogbookTfp
     {
-        // Check uniqueness
+        // Check uniqueness (fast path — avoids hitting the DB constraint)
         if (LogbookTfp::whereDate('date', $date)->exists()) {
             throw new RuntimeException(
                 "Logbook TFP untuk tanggal {$date} sudah ada."
             );
         }
 
-        return DB::transaction(function () use ($date, $creator) {
-            $logbook = LogbookTfp::create([
-                'date'            => $date,
-                'created_by_id'   => $creator?->id,
-                'created_by_name' => $creator?->name,
-            ]);
+        try {
+            return DB::transaction(function () use ($date, $creator) {
+                $logbook = LogbookTfp::create([
+                    'date'            => $date,
+                    'created_by_id'   => $creator?->id,
+                    'created_by_name' => $creator?->name,
+                ]);
 
-            // Seed items from active equipment master
-            $equipments = TfpEquipment::active()->ordered()->get();
-            $itemRows = $equipments->map(fn ($eq) => [
-                'logbook_tfp_id'   => $logbook->id,
-                'tfp_equipment_id' => $eq->id,
-                'status_pagi'      => null,
-                'status_siang'     => null,
-                'status_malam'     => null,
-                'created_at'       => now(),
-                'updated_at'       => now(),
-            ])->toArray();
+                // Seed items from active equipment master
+                $equipments = TfpEquipment::active()->ordered()->get();
+                $itemRows = $equipments->map(fn ($eq) => [
+                    'logbook_tfp_id'   => $logbook->id,
+                    'tfp_equipment_id' => $eq->id,
+                    'status_pagi'      => null,
+                    'status_siang'     => null,
+                    'status_malam'     => null,
+                    'created_at'       => now(),
+                    'updated_at'       => now(),
+                ])->toArray();
 
-            if (!empty($itemRows)) {
-                LogbookTfpItem::insert($itemRows);
+                if (!empty($itemRows)) {
+                    LogbookTfpItem::insert($itemRows);
+                }
+
+                return $logbook->fresh([
+                    'items.equipment',
+                    'notes',
+                    'manager:id,name',
+                    'creator:id,name',
+                ]);
+            });
+        } catch (\Illuminate\Database\UniqueConstraintViolationException $e) {
+            // Race condition: another request inserted the same date between our check and insert
+            throw new RuntimeException(
+                "Logbook TFP untuk tanggal {$date} sudah ada."
+            );
+        } catch (\Illuminate\Database\QueryException $e) {
+            // Catch generic unique violation (SQLSTATE 23505) for older Laravel versions
+            if (str_contains($e->getMessage(), '23505') || str_contains($e->getMessage(), 'unique')) {
+                throw new RuntimeException(
+                    "Logbook TFP untuk tanggal {$date} sudah ada."
+                );
             }
-
-            return $logbook->fresh([
-                'items.equipment',
-                'notes',
-                'manager:id,name',
-                'creator:id,name',
-            ]);
-        });
+            throw $e;
+        }
     }
 
     // ─── Personnel On Duty ─────────────────────────────────────
