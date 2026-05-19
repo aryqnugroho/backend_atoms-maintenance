@@ -31,7 +31,17 @@ class LogbookTfpController extends Controller
         $perPage = min((int) $request->input('per_page', 15), 100);
 
         $logbooks = $this->service->listLogbooks($filters, $perPage);
-        $logbooks->through(fn (LogbookTfp $l) => $this->summarize($l));
+
+        // Batch-fetch Manager Teknik per shift for all dates on this page (single query)
+        $dates = $logbooks->getCollection()
+            ->map(fn (LogbookTfp $l) => $l->date?->format('Y-m-d'))
+            ->filter()
+            ->unique()
+            ->values()
+            ->toArray();
+        $managersMap = $this->service->getManagersOnDutyForDates($dates);
+
+        $logbooks->through(fn (LogbookTfp $l) => $this->summarize($l, $managersMap));
 
         return $this->success($logbooks, 'Logbook TFP list retrieved');
     }
@@ -354,17 +364,39 @@ class LogbookTfpController extends Controller
 
     // ─── Transformers ─────────────────────────────────────────
 
-    private function summarize(LogbookTfp $l): array
+    /**
+     * @param  array<string, array{pagi: ?object, siang: ?object, malam: ?object}>  $managersMap
+     */
+    private function summarize(LogbookTfp $l, array $managersMap = []): array
     {
+        $dateKey      = $l->date?->format('Y-m-d');
+        $managersByShift = $dateKey ? ($managersMap[$dateKey] ?? null) : null;
+
+        // Build ordered array of managers on duty (pagi → siang → malam)
+        $managersOnDuty = [];
+        if ($managersByShift) {
+            foreach (['pagi', 'siang', 'malam'] as $shift) {
+                $mgr = $managersByShift[$shift] ?? null;
+                if ($mgr) {
+                    $managersOnDuty[] = [
+                        'shift'   => $shift,
+                        'name'    => $mgr->name,
+                        'user_id' => $mgr->user_id,
+                    ];
+                }
+            }
+        }
+
         return [
             'id'                    => $l->id,
-            'date'                  => $l->date?->format('Y-m-d'),
+            'date'                  => $dateKey,
             'is_signed'             => !empty($l->manager_signature),
             'manager_signed_by_name'=> $l->manager_signed_by_name,
             'manager_signed_at'     => $l->manager_signed_at?->toISOString(),
             'notes_count'           => $l->notes_count ?? 0,
             'created_by_name'       => $l->created_by_name,
             'created_at'            => $l->created_at?->toISOString(),
+            'managers_on_duty'      => $managersOnDuty,
         ];
     }
 

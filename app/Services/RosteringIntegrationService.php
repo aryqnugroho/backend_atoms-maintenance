@@ -186,6 +186,76 @@ class RosteringIntegrationService
     }
 
     /**
+     * Batch-fetch all Manager Teknik assigned across a list of dates and all 3 shifts
+     * in a single query. Used by list views (e.g. Logbook TFP) to avoid N×3 queries.
+     *
+     * @param  array<int, string>  $dates  list of 'Y-m-d' strings
+     * @return array<string, array{pagi: ?object, siang: ?object, malam: ?object}>
+     *         keyed by date string. Missing dates / shifts return null.
+     */
+    public function getShiftManagersForDates(array $dates): array
+    {
+        // Initialize empty structure
+        $result = [];
+        foreach ($dates as $d) {
+            $result[$d] = ['pagi' => null, 'siang' => null, 'malam' => null];
+        }
+        if (empty($dates)) {
+            return $result;
+        }
+
+        try {
+            $rows = DB::connection('rostering')
+                ->table('shift_assignments as sa')
+                ->join('roster_days as rd', 'rd.id', '=', 'sa.roster_day_id')
+                ->join('roster_periods as rp', 'rp.id', '=', 'rd.roster_period_id')
+                ->join('employees as e', 'e.id', '=', 'sa.employee_id')
+                ->join('users as u', 'u.id', '=', 'e.user_id')
+                ->join('shifts as s', 's.id', '=', 'sa.shift_id')
+                ->whereIn('rd.work_date', $dates)
+                ->where('rp.status', 'published')
+                ->whereIn('s.name', ['pagi', 'siang', 'malam'])
+                ->where('e.employee_type', 'Manager Teknik')
+                ->whereNull('sa.deleted_at')
+                ->whereNull('rd.deleted_at')
+                ->whereNull('e.deleted_at')
+                ->whereNull('u.deleted_at')
+                ->where('u.is_active', true)
+                ->select(
+                    'rd.work_date',
+                    's.name as shift',
+                    'u.id as user_id',
+                    'u.name'
+                )
+                ->orderBy('u.name')
+                ->get();
+
+            foreach ($rows as $row) {
+                $dateKey = Carbon::parse($row->work_date)->format('Y-m-d');
+                $shift   = strtolower((string) $row->shift);
+                if (!isset($result[$dateKey]) || !in_array($shift, ['pagi', 'siang', 'malam'], true)) {
+                    continue;
+                }
+                // Keep only the first manager per (date, shift) — matches single-result behavior of getShiftManager
+                if ($result[$dateKey][$shift] === null) {
+                    $result[$dateKey][$shift] = (object) [
+                        'user_id' => (int) $row->user_id,
+                        'name'    => $row->name,
+                    ];
+                }
+            }
+
+            return $result;
+        } catch (\Exception $e) {
+            Log::warning('RosteringIntegrationService::getShiftManagersForDates failed', [
+                'date_count' => count($dates),
+                'error'      => $e->getMessage(),
+            ]);
+            return $result;
+        }
+    }
+
+    /**
      * Get the Supervisor for a shift, restricted to a single employee_type
      * (CNS for CNSD, Support for TFP).
      *

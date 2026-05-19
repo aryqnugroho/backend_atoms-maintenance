@@ -156,6 +156,18 @@ class LogbookTfpService
     // ─── Personnel On Duty ─────────────────────────────────────
 
     /**
+     * Batch-resolve Manager Teknik per shift for a list of dates.
+     * Used by the list view to display all managers on duty per logbook row.
+     *
+     * @param  array<int, string>  $dates  list of 'Y-m-d' strings
+     * @return array<string, array{pagi: ?object, siang: ?object, malam: ?object}>
+     */
+    public function getManagersOnDutyForDates(array $dates): array
+    {
+        return $this->rosteringService->getShiftManagersForDates($dates);
+    }
+
+    /**
      * Resolve personnel on duty for all 3 shifts of the logbook date.
      * Pulled from rostering (read-only). Returns null values gracefully.
      */
