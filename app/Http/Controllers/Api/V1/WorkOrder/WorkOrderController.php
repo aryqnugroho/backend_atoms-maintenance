@@ -290,6 +290,10 @@ class WorkOrderController extends Controller
                 'id' => $wo->supervisor->id,
                 'name' => $wo->supervisor->name,
             ] : null,
+            'creator' => $wo->creator ? [
+                'id' => $wo->creator->id,
+                'name' => $wo->creator->name,
+            ] : null,
             'personnel' => $wo->personnel->map(function ($p) {
                 return [
                     'user_id' => $p->user_id,
