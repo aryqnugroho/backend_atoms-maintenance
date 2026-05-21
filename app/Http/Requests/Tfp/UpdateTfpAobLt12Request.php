@@ -19,20 +19,19 @@ class UpdateTfpAobLt12Request extends FormRequest
     public function rules(): array
     {
         return [
-            // Items (measurement parameters)
-            'items'                          => ['required', 'array', 'min:1'],
-            'items.*.id'                     => ['required', 'integer'],
-            'items.*.panel_a05_app_room'     => ['nullable', 'string', 'max:100'],
-            'items.*.panel_a06_app_room'     => ['nullable', 'string', 'max:100'],
-            'items.*.panel_a07_app_room'     => ['nullable', 'string', 'max:100'],
-            'items.*.panel_a08_gudang_lt1'   => ['nullable', 'string', 'max:100'],
-            'items.*.panel_a22_gudang_lt1'   => ['nullable', 'string', 'max:100'],
-            'items.*.panel_a09_amsc_room'    => ['nullable', 'string', 'max:100'],
+            // Optional explicit time override (HH:MM). Falls back to now() on the server when omitted.
+            'time_filled'      => ['nullable', 'string', 'regex:/^([01]\d|2[0-3]):[0-5]\d$/'],
+
+            // Items: each carries a `values` map keyed by composite "panel_id.sub_col_key".
+            'items'            => ['required', 'array', 'min:1'],
+            'items.*.id'       => ['required', 'integer'],
+            'items.*.values'   => ['nullable', 'array'],
+            'items.*.values.*' => ['nullable'],
 
             // Facilities (optional)
             'facilities'              => ['sometimes', 'array'],
             'facilities.*.id'         => ['required_with:facilities', 'integer'],
-            'facilities.*.kondisi'    => ['nullable', 'string', 'in:Baik,Normal,Tidak Baik'],
+            'facilities.*.kondisi'    => ['nullable', 'string', 'in:Baik,Rusak,Tidak Ada'],
             'facilities.*.keterangan' => ['nullable', 'string', 'max:500'],
         ];
     }
@@ -40,10 +39,11 @@ class UpdateTfpAobLt12Request extends FormRequest
     public function messages(): array
     {
         return [
+            'time_filled.regex'   => 'Waktu pengisian harus dalam format HH:MM.',
             'items.required'      => 'Minimal satu item harus disertakan.',
             'items.array'         => 'Items harus berupa array.',
             'items.*.id.required' => 'Setiap item wajib menyertakan id.',
-            'facilities.*.kondisi.in' => 'Kondisi harus salah satu dari: Baik, Normal, Tidak Baik.',
+            'facilities.*.kondisi.in' => 'Kondisi harus salah satu dari: Baik, Rusak, Tidak Ada.',
         ];
     }
 }

@@ -21,15 +21,7 @@ use RuntimeException;
 
 /**
  * TfpAobLt12Service — orchestrates the TFP Performance Check AOB Lantai 1 & 2
- * form on top of the rostering DB and the signature trait.
- *
- * Mirrors TfpAobGroundService closely:
- *   - Personnel are resolved from atoms-rostering at create time
- *     (date + shift_type). Only Support employees are taken as technicians.
- *   - Supervisor TFP = getShiftSupervisorByDivision($shift, $date, 'Support').
- *   - Signatures are immutable, name-matched, and never delegated.
- *   - The service NEVER writes to the rostering DB.
- *   - Items and facilities are seeded from TfpAobLt12Template at create.
+ * form. Mirrors TfpAobGroundService closely.
  */
 class TfpAobLt12Service
 {
@@ -56,21 +48,10 @@ class TfpAobLt12Service
             $query->byFormType('AOB-LT12');
         }
 
-        if (!empty($filters['date'])) {
-            $query->byDate($filters['date']);
-        }
-
-        if (!empty($filters['year'])) {
-            $query->whereYear('date', (int) $filters['year']);
-        }
-
-        if (!empty($filters['shift_type'])) {
-            $query->byShift($filters['shift_type']);
-        }
-
-        if (!empty($filters['status'])) {
-            $query->where('status', $filters['status']);
-        }
+        if (!empty($filters['date']))       $query->byDate($filters['date']);
+        if (!empty($filters['year']))       $query->whereYear('date', (int) $filters['year']);
+        if (!empty($filters['shift_type'])) $query->byShift($filters['shift_type']);
+        if (!empty($filters['status']))     $query->where('status', $filters['status']);
 
         if (!empty($filters['search'])) {
             $needle = '%' . $filters['search'] . '%';
@@ -83,28 +64,17 @@ class TfpAobLt12Service
 
         $sortBy  = $filters['sort_by']  ?? 'date';
         $sortDir = ($filters['sort_dir'] ?? 'desc') === 'asc' ? 'asc' : 'desc';
-        $allowed = ['date', 'created_at', 'shift_type', 'status'];
-        if (!in_array($sortBy, $allowed, true)) {
+        if (!in_array($sortBy, ['date', 'created_at', 'shift_type', 'status'], true)) {
             $sortBy = 'date';
         }
 
-        return $query
-            ->orderBy($sortBy, $sortDir)
-            ->orderByDesc('id')
-            ->paginate($perPage);
+        return $query->orderBy($sortBy, $sortDir)->orderByDesc('id')->paginate($perPage);
     }
 
     public function findRecord(int $id): ?TfpAobLt12Record
     {
         return TfpAobLt12Record::query()
-            ->with([
-                'technicians',
-                'items',
-                'facilities',
-                'manager:id,name',
-                'supervisor:id,name',
-                'creator:id,name',
-            ])
+            ->with(['technicians', 'items', 'facilities', 'manager:id,name', 'supervisor:id,name', 'creator:id,name'])
             ->find($id);
     }
 
@@ -119,12 +89,6 @@ class TfpAobLt12Service
 
     // ─── Create ────────────────────────────────────────────────
 
-    /**
-     * Create a new TFP AOB Lantai 1 & 2 record + auto-resolve personnel + seed items + facilities.
-     *
-     * @throws TfpAobLt12DuplicateException when a record already exists.
-     * @throws RuntimeException when no TFP technicians are on duty.
-     */
     public function createRecord(array $data, ?LocalUser $creator = null): TfpAobLt12Record
     {
         $formType  = $data['form_type']  ?? 'AOB-LT12';
@@ -132,14 +96,11 @@ class TfpAobLt12Service
         $shiftType = $data['shift_type'];
         $location  = $data['location']   ?? 'AOB LANTAI 1 & 2';
 
-        // Reject duplicate
         $existing = $this->findExistingRecord($formType, $date, $shiftType);
         if ($existing) {
             throw new TfpAobLt12DuplicateException($existing);
         }
 
-        // Resolve roster personnel BEFORE wrapping in a transaction so that
-        // a missing TFP technician fails fast without partial state.
         $rosterContext = $this->resolveRosterContext($shiftType, $date);
 
         if (empty($rosterContext['technicians'])) {
@@ -150,22 +111,14 @@ class TfpAobLt12Service
             );
         }
 
-        return DB::transaction(function () use (
-            $formType, $date, $shiftType, $location, $creator, $rosterContext
-        ) {
+        return DB::transaction(function () use ($formType, $date, $shiftType, $location, $creator, $rosterContext) {
             $manager    = $rosterContext['manager'];
             $supervisor = $rosterContext['supervisor'];
 
-            // Derive day_name (Indonesian) from date
             $carbonDate = Carbon::parse($date);
-            $dayNames   = [
-                'Sunday'    => 'Minggu',
-                'Monday'    => 'Senin',
-                'Tuesday'   => 'Selasa',
-                'Wednesday' => 'Rabu',
-                'Thursday'  => 'Kamis',
-                'Friday'    => 'Jumat',
-                'Saturday'  => 'Sabtu',
+            $dayNames = [
+                'Sunday' => 'Minggu', 'Monday' => 'Senin', 'Tuesday' => 'Selasa',
+                'Wednesday' => 'Rabu', 'Thursday' => 'Kamis', 'Friday' => 'Jumat', 'Saturday' => 'Sabtu',
             ];
             $dayName = $dayNames[$carbonDate->format('l')] ?? $carbonDate->format('l');
 
@@ -177,6 +130,7 @@ class TfpAobLt12Service
                 'time_filled'     => now()->format('H:i'),
                 'shift_type'      => $shiftType,
                 'location'        => $location,
+                'columns_config'  => TfpAobLt12Template::defaultColumnsConfig(),
                 'status'          => 'ongoing',
                 'manager_id'      => $manager?->id,
                 'manager_name'    => $manager?->name,
@@ -186,7 +140,6 @@ class TfpAobLt12Service
                 'created_by_name' => $creator?->name,
             ]);
 
-            // Seed technicians
             $sort = 0;
             foreach ($rosterContext['technicians'] as $tech) {
                 TfpAobLt12Technician::create([
@@ -197,35 +150,17 @@ class TfpAobLt12Service
                 ]);
             }
 
-            // Seed items from template
             $itemRows = TfpAobLt12Template::buildItemRows($record->id);
-            if (!empty($itemRows)) {
-                TfpAobLt12Item::insert($itemRows);
-            }
+            if (!empty($itemRows)) TfpAobLt12Item::insert($itemRows);
 
-            // Seed facilities from template
             $facilityRows = TfpAobLt12Template::buildFacilityRows($record->id);
-            if (!empty($facilityRows)) {
-                TfpAobLt12Facility::insert($facilityRows);
-            }
+            if (!empty($facilityRows)) TfpAobLt12Facility::insert($facilityRows);
 
             $record->refresh();
-            return $record->load([
-                'technicians',
-                'items',
-                'facilities',
-                'manager:id,name',
-                'supervisor:id,name',
-            ]);
+            return $record->load(['technicians', 'items', 'facilities', 'manager:id,name', 'supervisor:id,name']);
         });
     }
 
-    /**
-     * Resolve roster personnel for a given shift+date.
-     *
-     * Only employees with employee_type = 'Support' are accepted as technicians.
-     * Supervisor TFP = getShiftSupervisorByDivision($shift, $date, 'Support').
-     */
     private function resolveRosterContext(string $shiftType, string $date): array
     {
         $manager     = null;
@@ -234,14 +169,10 @@ class TfpAobLt12Service
 
         try {
             $rosterManager = $this->rosteringService->getShiftManager($shiftType, $date);
-            if ($rosterManager) {
-                $manager = $this->userResolver->ensureLocalUser((int) $rosterManager->user_id);
-            }
+            if ($rosterManager) $manager = $this->userResolver->ensureLocalUser((int) $rosterManager->user_id);
 
             $rosterSupervisor = $this->rosteringService->getShiftSupervisorByDivision($shiftType, $date, 'Support');
-            if ($rosterSupervisor) {
-                $supervisor = $this->userResolver->ensureLocalUser((int) $rosterSupervisor->user_id);
-            }
+            if ($rosterSupervisor) $supervisor = $this->userResolver->ensureLocalUser((int) $rosterSupervisor->user_id);
 
             $personnel   = $this->rosteringService->getShiftPersonnel($shiftType, $date);
             $supportOnly = $personnel->filter(fn ($p) => $p->employee_type === 'Support')->values();
@@ -255,8 +186,7 @@ class TfpAobLt12Service
                 ];
             }
 
-            // Exclude supervisor and manager from the technician list.
-            $technicians = \App\Services\WorkOrderService::excludeSignerRoles(
+            $technicians = WorkOrderService::excludeSignerRoles(
                 $technicians,
                 $rosterSupervisor ? (int) $rosterSupervisor->user_id : null,
                 $supervisor?->name,
@@ -265,166 +195,367 @@ class TfpAobLt12Service
             );
         } catch (\Throwable $e) {
             Log::warning('TfpAobLt12Service: roster lookup failed', [
-                'shift_type' => $shiftType,
-                'date'       => $date,
-                'error'      => $e->getMessage(),
+                'shift_type' => $shiftType, 'date' => $date, 'error' => $e->getMessage(),
             ]);
         }
 
-        return [
-            'manager'     => $manager,
-            'supervisor'  => $supervisor,
-            'technicians' => $technicians,
-        ];
+        return ['manager' => $manager, 'supervisor' => $supervisor, 'technicians' => $technicians];
     }
 
-    /**
-     * Generate a sequential form number for TFP AOB Lantai 1 & 2 records.
-     *
-     * Format: TFP-AOBLT12-{YYMMDD}-{SEQ}
-     * Example: TFP-AOBLT12-260519-001
-     *
-     * Rules:
-     *   - Prefix: always "TFP-AOBLT12"
-     *   - Date:   YYMMDD (2-digit year + 2-digit month + 2-digit day)
-     *   - SEQ:    3-digit zero-padded, reset per calendar date
-     *   - Counter uses withTrashed() so soft-deleted rows still increment seq
-     *
-     * @param string $date  Y-m-d
-     */
     public function generateFormNumber(string $date): string
     {
         $dateYymmdd = date('ymd', strtotime($date));
         $prefix = 'TFP-AOBLT12-' . $dateYymmdd;
-
-        $count = TfpAobLt12Record::withTrashed()
-            ->where('form_number', 'LIKE', $prefix . '%')
-            ->count();
-
+        $count = TfpAobLt12Record::withTrashed()->where('form_number', 'LIKE', $prefix . '%')->count();
         return $prefix . '-' . str_pad($count + 1, 3, '0', STR_PAD_LEFT);
     }
 
-    // ─── Update ────────────────────────────────────────────────
+    // ─── Update items + facilities ─────────────────────────────
 
     /**
-     * Update item values on an existing record.
-     * Personnel, signatures, dates, and form numbers are NOT touched here.
-     *
-     * @param array<int, array{
-     *   id:int,
-     *   panel_a05_app_room?:string|null,
-     *   panel_a06_app_room?:string|null,
-     *   panel_a07_app_room?:string|null,
-     *   panel_a08_gudang_lt1?:string|null,
-     *   panel_a22_gudang_lt1?:string|null,
-     *   panel_a09_amsc_room?:string|null,
-     * }> $items
+     * Update item values. Cells are keyed by composite "panel_id.sub_col_key".
+     * Disabled cells (per item) and keys not in columns_config are silently dropped.
      */
-    public function updateItems(TfpAobLt12Record $record, array $items): TfpAobLt12Record
+    public function updateItems(TfpAobLt12Record $record, array $items, ?string $timeOverride = null): TfpAobLt12Record
     {
         if ($record->status === 'completed') {
             throw new RuntimeException('Form yang sudah completed tidak dapat diubah lagi.');
         }
 
-        return DB::transaction(function () use ($record, $items) {
+        $allowedKeys = $this->cellKeysFromConfig($record);
+
+        return DB::transaction(function () use ($record, $items, $timeOverride, $allowedKeys) {
             $existing = $record->items()->get()->keyBy('id');
 
             foreach ($items as $payload) {
-                if (empty($payload['id']) || !$existing->has($payload['id'])) {
-                    continue;
-                }
+                if (empty($payload['id']) || !$existing->has($payload['id'])) continue;
 
                 /** @var TfpAobLt12Item $item */
                 $item = $existing->get($payload['id']);
-
-                // Allowed value columns. We strip disabled columns per row so that
-                // the frontend (or any client) cannot accidentally write to grey
-                // cells. is_disabled_map is the source of truth.
-                $allowed = [
-                    'panel_a05_app_room',
-                    'panel_a06_app_room',
-                    'panel_a07_app_room',
-                    'panel_a08_gudang_lt1',
-                    'panel_a22_gudang_lt1',
-                    'panel_a09_amsc_room',
-                ];
+                $incoming = is_array($payload['values'] ?? null) ? $payload['values'] : [];
 
                 $disabledMap = is_array($item->is_disabled_map) ? $item->is_disabled_map : [];
-                $effective = array_diff(
-                    $allowed,
-                    array_keys(array_filter($disabledMap, static fn ($v) => $v === true))
-                );
+                $disabledKeys = array_keys(array_filter($disabledMap, static fn ($v) => $v === true));
 
-                $item->fill(array_intersect_key($payload, array_flip($effective)));
+                $clean = [];
+                foreach ($incoming as $cellKey => $cellVal) {
+                    if (!is_string($cellKey)) continue;
+                    if (in_array($cellKey, $disabledKeys, true)) continue;
+                    if (!empty($allowedKeys) && !in_array($cellKey, $allowedKeys, true)) continue;
+                    $stringVal = $cellVal === null ? null : trim((string) $cellVal);
+                    if ($stringVal === null || $stringVal === '') continue;
+                    $clean[$cellKey] = mb_substr($stringVal, 0, 100);
+                }
+
+                $item->values = empty($clean) ? null : $clean;
                 $item->save();
             }
 
-            // Refresh the "Jam Pelaksanaan" so it reflects the most recent fill time.
-            $record->time_filled = now()->format('H:i');
+            $record->time_filled = $timeOverride ?: now()->format('H:i');
             $record->save();
 
-            return $record->fresh([
-                'technicians',
-                'items',
-                'facilities',
-                'manager:id,name',
-                'supervisor:id,name',
-            ]);
+            return $this->fresh($record);
         });
     }
 
-    /**
-     * Update facility condition values on an existing record.
-     *
-     * @param array<int, array{
-     *   id:int,
-     *   kondisi?:string|null,
-     *   keterangan?:string|null,
-     * }> $facilities
-     */
-    public function updateFacilities(TfpAobLt12Record $record, array $facilities): TfpAobLt12Record
+    public function updateFacilities(TfpAobLt12Record $record, array $facilities, ?string $timeOverride = null): TfpAobLt12Record
     {
         if ($record->status === 'completed') {
             throw new RuntimeException('Form yang sudah completed tidak dapat diubah lagi.');
         }
 
-        return DB::transaction(function () use ($record, $facilities) {
+        return DB::transaction(function () use ($record, $facilities, $timeOverride) {
             $existing = $record->facilities()->get()->keyBy('id');
 
             foreach ($facilities as $payload) {
-                if (empty($payload['id']) || !$existing->has($payload['id'])) {
-                    continue;
-                }
+                if (empty($payload['id']) || !$existing->has($payload['id'])) continue;
 
                 /** @var TfpAobLt12Facility $facility */
                 $facility = $existing->get($payload['id']);
-
-                $facility->fill(array_intersect_key($payload, array_flip([
-                    'kondisi',
-                    'keterangan',
-                ])));
+                $facility->fill(array_intersect_key($payload, array_flip(['kondisi', 'keterangan'])));
                 $facility->save();
             }
 
-            // Refresh time_filled to reflect when the user saved this snapshot.
-            $record->time_filled = now()->format('H:i');
+            $record->time_filled = $timeOverride ?: now()->format('H:i');
             $record->save();
 
-            return $record->fresh([
-                'technicians',
-                'items',
-                'facilities',
-                'manager:id,name',
-                'supervisor:id,name',
-            ]);
+            return $this->fresh($record);
         });
+    }
+
+    private function cellKeysFromConfig(TfpAobLt12Record $record): array
+    {
+        $config = is_array($record->columns_config) ? $record->columns_config : [];
+        $keys = [];
+        foreach ($config as $panel) {
+            $pid = $panel['id'] ?? null;
+            $subs = $panel['sub_columns'] ?? [];
+            if (!$pid || !is_array($subs)) continue;
+            foreach ($subs as $sub) {
+                $sk = $sub['key'] ?? null;
+                if ($sk) $keys[] = $pid . '.' . $sk;
+            }
+        }
+        return $keys;
+    }
+
+    // ─── Structural edit (parameters) ──────────────────────────
+
+    public function addParameter(TfpAobLt12Record $record, array $data): TfpAobLt12Record
+    {
+        if ($record->status === 'completed') {
+            throw new RuntimeException('Form yang sudah completed tidak dapat diubah strukturnya.');
+        }
+
+        $maxSort = (int) ($record->items()->max('sort_order') ?? -1);
+
+        TfpAobLt12Item::create([
+            'aob_lt12_record_id' => $record->id,
+            'parameter_number'   => $data['parameter_number'] ?? (string) ($maxSort + 2),
+            'parameter_name'     => trim((string) $data['parameter_name']),
+            'unit'               => isset($data['unit']) ? trim((string) $data['unit']) : null,
+            'values'             => null,
+            'is_disabled_map'    => null,
+            'merge_map'          => null,
+            'sort_order'         => $maxSort + 1,
+        ]);
+
+        return $this->fresh($record);
+    }
+
+    public function updateParameterStructure(TfpAobLt12Record $record, int $paramId, array $data): TfpAobLt12Record
+    {
+        if ($record->status === 'completed') {
+            throw new RuntimeException('Form yang sudah completed tidak dapat diubah strukturnya.');
+        }
+
+        /** @var TfpAobLt12Item|null $item */
+        $item = $record->items()->where('id', $paramId)->first();
+        if (!$item) throw new InvalidArgumentException('Parameter tidak ditemukan.');
+
+        $patch = [];
+        if (array_key_exists('parameter_name', $data)) {
+            $patch['parameter_name'] = trim((string) $data['parameter_name']);
+        }
+        if (array_key_exists('parameter_number', $data)) {
+            $patch['parameter_number'] = $data['parameter_number'] !== null && $data['parameter_number'] !== ''
+                ? trim((string) $data['parameter_number']) : null;
+        }
+        if (array_key_exists('unit', $data)) {
+            $patch['unit'] = $data['unit'] !== null && $data['unit'] !== ''
+                ? trim((string) $data['unit']) : null;
+        }
+
+        if (!empty($patch)) { $item->fill($patch); $item->save(); }
+        return $this->fresh($record);
+    }
+
+    public function deleteParameter(TfpAobLt12Record $record, int $paramId): TfpAobLt12Record
+    {
+        if ($record->status === 'completed') {
+            throw new RuntimeException('Form yang sudah completed tidak dapat diubah strukturnya.');
+        }
+        $deleted = $record->items()->where('id', $paramId)->delete();
+        if ($deleted === 0) throw new InvalidArgumentException('Parameter tidak ditemukan.');
+        return $this->fresh($record);
+    }
+
+    public function reorderParameters(TfpAobLt12Record $record, array $orderedIds): TfpAobLt12Record
+    {
+        if ($record->status === 'completed') {
+            throw new RuntimeException('Form yang sudah completed tidak dapat diubah strukturnya.');
+        }
+        DB::transaction(function () use ($record, $orderedIds) {
+            foreach ($orderedIds as $index => $id) {
+                $record->items()->where('id', $id)->update(['sort_order' => $index]);
+            }
+        });
+        return $this->fresh($record);
+    }
+
+    // ─── Structural edit (facilities) ──────────────────────────
+
+    public function addFacility(TfpAobLt12Record $record, array $data): TfpAobLt12Record
+    {
+        if ($record->status === 'completed') {
+            throw new RuntimeException('Form yang sudah completed tidak dapat diubah strukturnya.');
+        }
+        $maxSort = (int) ($record->facilities()->max('sort_order') ?? -1);
+        TfpAobLt12Facility::create([
+            'aob_lt12_record_id' => $record->id,
+            'facility_name'      => trim((string) $data['facility_name']),
+            'kondisi'            => null, 'keterangan' => null,
+            'sort_order'         => $maxSort + 1,
+        ]);
+        return $this->fresh($record);
+    }
+
+    public function updateFacilityStructure(TfpAobLt12Record $record, int $facilityId, array $data): TfpAobLt12Record
+    {
+        if ($record->status === 'completed') {
+            throw new RuntimeException('Form yang sudah completed tidak dapat diubah strukturnya.');
+        }
+        /** @var TfpAobLt12Facility|null $facility */
+        $facility = $record->facilities()->where('id', $facilityId)->first();
+        if (!$facility) throw new InvalidArgumentException('Fasilitas tidak ditemukan.');
+        if (array_key_exists('facility_name', $data)) {
+            $facility->facility_name = trim((string) $data['facility_name']);
+            $facility->save();
+        }
+        return $this->fresh($record);
+    }
+
+    public function deleteFacility(TfpAobLt12Record $record, int $facilityId): TfpAobLt12Record
+    {
+        if ($record->status === 'completed') {
+            throw new RuntimeException('Form yang sudah completed tidak dapat diubah strukturnya.');
+        }
+        $deleted = $record->facilities()->where('id', $facilityId)->delete();
+        if ($deleted === 0) throw new InvalidArgumentException('Fasilitas tidak ditemukan.');
+        return $this->fresh($record);
+    }
+
+    public function reorderFacilities(TfpAobLt12Record $record, array $orderedIds): TfpAobLt12Record
+    {
+        if ($record->status === 'completed') {
+            throw new RuntimeException('Form yang sudah completed tidak dapat diubah strukturnya.');
+        }
+        DB::transaction(function () use ($record, $orderedIds) {
+            foreach ($orderedIds as $index => $id) {
+                $record->facilities()->where('id', $id)->update(['sort_order' => $index]);
+            }
+        });
+        return $this->fresh($record);
+    }
+
+    private function fresh(TfpAobLt12Record $record): TfpAobLt12Record
+    {
+        return $record->fresh(['technicians', 'items', 'facilities', 'manager:id,name', 'supervisor:id,name']);
+    }
+
+    /**
+     * Batch save Excel-like editor state: columns_config + per-item disabled/merge.
+     * Cells whose keys are no longer in the new config get pruned from values JSON.
+     */
+    public function saveStructure(TfpAobLt12Record $record, array $columnsConfig, array $itemPatches): TfpAobLt12Record
+    {
+        if ($record->status === 'completed') {
+            throw new RuntimeException('Form yang sudah completed tidak dapat diubah strukturnya.');
+        }
+
+        $normalized = $this->normalizeColumnsConfig($columnsConfig);
+        if (empty($normalized)) {
+            throw new InvalidArgumentException('Minimal harus ada satu panel dengan satu sub-kolom.');
+        }
+
+        $allowedKeys = [];
+        foreach ($normalized as $panel) {
+            foreach ($panel['sub_columns'] as $sub) {
+                $allowedKeys[] = $panel['id'] . '.' . $sub['key'];
+            }
+        }
+
+        return DB::transaction(function () use ($record, $normalized, $itemPatches, $allowedKeys) {
+            $record->columns_config = $normalized;
+            $record->save();
+
+            $existing = $record->items()->get()->keyBy('id');
+
+            foreach ($itemPatches as $patch) {
+                if (empty($patch['id']) || !$existing->has($patch['id'])) continue;
+
+                /** @var TfpAobLt12Item $item */
+                $item = $existing->get($patch['id']);
+
+                if (array_key_exists('is_disabled_map', $patch)) {
+                    $map = is_array($patch['is_disabled_map']) ? $patch['is_disabled_map'] : [];
+                    $clean = [];
+                    foreach ($map as $k => $v) {
+                        if (is_string($k) && in_array($k, $allowedKeys, true) && $v === true) {
+                            $clean[$k] = true;
+                        }
+                    }
+                    $item->is_disabled_map = empty($clean) ? null : $clean;
+                }
+
+                if (array_key_exists('merge_map', $patch)) {
+                    $map = is_array($patch['merge_map']) ? $patch['merge_map'] : [];
+                    $clean = [];
+                    foreach ($map as $k => $v) {
+                        $span = (int) $v;
+                        if (is_string($k) && in_array($k, $allowedKeys, true) && $span >= 2) {
+                            $clean[$k] = $span;
+                        }
+                    }
+                    $item->merge_map = empty($clean) ? null : $clean;
+                }
+
+                $values = is_array($item->values) ? $item->values : [];
+                $pruned = array_intersect_key($values, array_flip($allowedKeys));
+                if (count($pruned) !== count($values)) {
+                    $item->values = empty($pruned) ? null : $pruned;
+                }
+
+                $item->save();
+            }
+
+            $patchedIds = array_filter(array_map(fn ($p) => $p['id'] ?? null, $itemPatches));
+            foreach ($existing as $item) {
+                if (in_array($item->id, $patchedIds, true)) continue;
+                $values = is_array($item->values) ? $item->values : [];
+                $pruned = array_intersect_key($values, array_flip($allowedKeys));
+                if (count($pruned) !== count($values)) {
+                    $item->values = empty($pruned) ? null : $pruned;
+                    $item->save();
+                }
+            }
+
+            return $this->fresh($record);
+        });
+    }
+
+    private function normalizeColumnsConfig(array $raw): array
+    {
+        $out = [];
+        $seenIds = [];
+
+        foreach ($raw as $panel) {
+            $id    = isset($panel['id'])    ? $this->slug((string) $panel['id'])    : null;
+            $label = isset($panel['label']) ? trim((string) $panel['label']) : '';
+            $subs  = isset($panel['sub_columns']) && is_array($panel['sub_columns']) ? $panel['sub_columns'] : [];
+
+            if (!$id || $label === '' || empty($subs)) continue;
+            if (in_array($id, $seenIds, true)) continue;
+
+            $cleanSubs = [];
+            $seenSubKeys = [];
+            foreach ($subs as $sub) {
+                $sk = isset($sub['key'])   ? $this->slug((string) $sub['key'])   : null;
+                $sl = isset($sub['label']) ? trim((string) $sub['label']) : '';
+                if (!$sk || $sl === '' || in_array($sk, $seenSubKeys, true)) continue;
+                $cleanSubs[] = ['key' => $sk, 'label' => mb_substr($sl, 0, 60)];
+                $seenSubKeys[] = $sk;
+            }
+
+            if (empty($cleanSubs)) continue;
+
+            $out[] = ['id' => $id, 'label' => mb_substr($label, 0, 80), 'sub_columns' => $cleanSubs];
+            $seenIds[] = $id;
+        }
+
+        return $out;
+    }
+
+    private function slug(string $raw): string
+    {
+        $s = mb_strtolower(trim($raw));
+        $s = preg_replace('/[^a-z0-9]+/u', '_', $s) ?? '';
+        $s = preg_replace('/_+/', '_', $s) ?? '';
+        return trim($s, '_');
     }
 
     // ─── Sign ──────────────────────────────────────────────────
 
-    /**
-     * Sign the TFP AOB Lantai 1 & 2 record on behalf of a role.
-     */
     public function signRecord(
         TfpAobLt12Record $record,
         string $role,
@@ -455,22 +586,12 @@ class TfpAobLt12Service
                 $record->save();
             }
 
-            return $record->fresh([
-                'technicians',
-                'items',
-                'facilities',
-                'manager:id,name',
-                'supervisor:id,name',
-            ]);
+            return $this->fresh($record);
         });
     }
 
-    private function signRecordRole(
-        TfpAobLt12Record $record,
-        string $role,
-        string $base64,
-        LocalUser $signer,
-    ): void {
+    private function signRecordRole(TfpAobLt12Record $record, string $role, string $base64, LocalUser $signer): void
+    {
         $expectedName = match ($role) {
             'manager'    => $record->manager_name,
             'supervisor' => $record->supervisor_name,
@@ -484,7 +605,6 @@ class TfpAobLt12Service
             );
         }
 
-        // Use centralized role-based delegation authorization
         $slotType = \App\Services\SignatureAuthorizationService::slotType($role);
         $targetId = match ($role) {
             'manager'    => $record->manager_id ? (int) $record->manager_id : null,
@@ -493,43 +613,25 @@ class TfpAobLt12Service
         };
 
         \App\Services\SignatureAuthorizationService::authorize($signer, $slotType, $targetId, $expectedName);
-
-        // Use the trait — it enforces immutability + base64 PNG validation.
         $record->saveSignature($role, $base64, $signer->id);
     }
 
-    private function signTechnicianRow(
-        TfpAobLt12Record $record,
-        string $base64,
-        LocalUser $signer,
-        ?int $technicianRowId,
-    ): void {
-        // Use role-based delegation: Manager/Supervisor/Technician can all sign technician slots
+    private function signTechnicianRow(TfpAobLt12Record $record, string $base64, LocalUser $signer, ?int $technicianRowId): void
+    {
         \App\Services\SignatureAuthorizationService::authorize($signer, 'technician', null, null);
 
         /** @var TfpAobLt12Technician|null $row */
         $row = null;
-        if ($technicianRowId) {
-            $row = $record->technicians()->where('id', $technicianRowId)->first();
-        }
-        if (!$row && $signer->id) {
-            $row = $record->technicians()->where('technician_id', $signer->id)->first();
-        }
+        if ($technicianRowId) $row = $record->technicians()->where('id', $technicianRowId)->first();
+        if (!$row && $signer->id) $row = $record->technicians()->where('technician_id', $signer->id)->first();
         if (!$row) {
-            $row = $record->technicians()
-                ->get()
+            $row = $record->technicians()->get()
                 ->first(fn (TfpAobLt12Technician $t) => WorkOrderService::namesMatch($t->technician_name, $signer->name));
         }
+        if (!$row) $row = $record->technicians()->whereNull('technician_signature')->first();
 
         if (!$row) {
-            // For delegation: pick first unsigned row
-            $row = $record->technicians()->whereNull('technician_signature')->first();
-        }
-
-        if (!$row) {
-            throw new SignerNotAuthorizedException(
-                'Tidak ada slot teknisi yang tersedia untuk ditandatangani pada form ini.'
-            );
+            throw new SignerNotAuthorizedException('Tidak ada slot teknisi yang tersedia untuk ditandatangani pada form ini.');
         }
 
         if (!empty($row->technician_signature)) {
@@ -541,7 +643,6 @@ class TfpAobLt12Service
         $row->technician_signature = $base64;
         $row->technician_signed_by = $signer->id;
         $row->technician_signed_at = now();
-        // Audit trail
         if (in_array('technician_signed_by_name', $row->getFillable(), true) || array_key_exists('technician_signed_by_name', $row->getAttributes())) {
             $row->technician_signed_by_name = $signer->name;
             $row->technician_signed_by_role = $signer->role;

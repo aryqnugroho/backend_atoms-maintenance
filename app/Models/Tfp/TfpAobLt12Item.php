@@ -8,15 +8,9 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 /**
  * TfpAobLt12Item — one measurement parameter row for a TFP AOB Lantai 1 & 2 record.
  *
- * Columns map to the physical form columns (6 panels, each single value):
- *   - panel_a05_app_room   → Panel A 05 APP Room
- *   - panel_a06_app_room   → Panel A 06 APP Room
- *   - panel_a07_app_room   → Panel A 07 APP Room
- *   - panel_a08_gudang_lt1 → Panel A 08 Gudang Lt 1
- *   - panel_a22_gudang_lt1 → Panel A 22 Gudang Lt 1
- *   - panel_a09_amsc_room  → Panel A 09 AMSC Room
- *
- * is_disabled_map marks which columns are greyed-out for this parameter.
+ * Cell values live in `values` JSON, keyed by composite "panelId.subKey"
+ * (e.g. "panel_a05_app_room.value"). Panel structure is defined per record
+ * via tfp_aob_lt12_records.columns_config.
  */
 class TfpAobLt12Item extends Model
 {
@@ -27,22 +21,18 @@ class TfpAobLt12Item extends Model
         'parameter_number',
         'parameter_name',
         'unit',
-        'panel_a05_app_room',
-        'panel_a06_app_room',
-        'panel_a07_app_room',
-        'panel_a08_gudang_lt1',
-        'panel_a22_gudang_lt1',
-        'panel_a09_amsc_room',
+        'values',
         'is_disabled_map',
+        'merge_map',
         'sort_order',
     ];
 
     protected $casts = [
+        'values'          => 'array',
         'is_disabled_map' => 'array',
+        'merge_map'       => 'array',
         'sort_order'      => 'integer',
     ];
-
-    // ─── Relationships ─────────────────────────────────────────
 
     public function record(): BelongsTo
     {

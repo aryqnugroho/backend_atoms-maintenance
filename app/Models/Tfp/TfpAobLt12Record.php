@@ -35,6 +35,7 @@ class TfpAobLt12Record extends Model
         'time_filled',
         'shift_type',
         'location',
+        'columns_config',
         'status',
         'manager_id',
         'manager_name',
@@ -52,6 +53,7 @@ class TfpAobLt12Record extends Model
 
     protected $casts = [
         'date'                 => 'date:Y-m-d',
+        'columns_config'       => 'array',
         'manager_signed_at'    => 'datetime',
         'supervisor_signed_at' => 'datetime',
     ];

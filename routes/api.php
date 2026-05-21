@@ -346,6 +346,17 @@ Route::prefix('v1')->group(function () {
             Route::delete('/{id}', [TfpAobLt12Controller::class, 'destroy'])
                 ->whereNumber('id')
                 ->middleware('role:Admin,Manager Teknik');
+
+            // Structural edit (Edit Mode) — controller enforces role guard
+            Route::put('/{id}/structure',                  [TfpAobLt12Controller::class, 'saveStructure'])->whereNumber('id');
+            Route::post('/{id}/parameters',                [TfpAobLt12Controller::class, 'addParameter'])->whereNumber('id');
+            Route::put('/{id}/parameters/{paramId}',       [TfpAobLt12Controller::class, 'updateParameter'])->whereNumber(['id', 'paramId']);
+            Route::delete('/{id}/parameters/{paramId}',    [TfpAobLt12Controller::class, 'deleteParameter'])->whereNumber(['id', 'paramId']);
+            Route::put('/{id}/parameters-reorder',         [TfpAobLt12Controller::class, 'reorderParameters'])->whereNumber('id');
+            Route::post('/{id}/facilities',                [TfpAobLt12Controller::class, 'addFacility'])->whereNumber('id');
+            Route::put('/{id}/facilities/{facilityId}',    [TfpAobLt12Controller::class, 'updateFacility'])->whereNumber(['id', 'facilityId']);
+            Route::delete('/{id}/facilities/{facilityId}', [TfpAobLt12Controller::class, 'deleteFacility'])->whereNumber(['id', 'facilityId']);
+            Route::put('/{id}/facilities-reorder',         [TfpAobLt12Controller::class, 'reorderFacilities'])->whereNumber('id');
         });
 
         // ─── TFP Performance Check Transmitter TX ──────────────
