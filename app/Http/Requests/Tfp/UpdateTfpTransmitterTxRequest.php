@@ -11,32 +11,27 @@ class UpdateTfpTransmitterTxRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'items'                              => ['required', 'array', 'min:1'],
-            'items.*.id'                         => ['required', 'integer'],
-            'items.*.panel_tx01'                 => ['nullable', 'string', 'max:100'],
-            'items.*.panel_tx02'                 => ['nullable', 'string', 'max:100'],
-            'items.*.panel_cos_tx03_input'        => ['nullable', 'string', 'max:100'],
-            'items.*.panel_cos_tx03_output'       => ['nullable', 'string', 'max:100'],
-            'items.*.panel_output_ups_tx04'       => ['nullable', 'string', 'max:100'],
-            'items.*.panel_ups_tx07_input'        => ['nullable', 'string', 'max:100'],
-            'items.*.panel_ups_tx07_output'       => ['nullable', 'string', 'max:100'],
-            'items.*.panel_ac_tx06'               => ['nullable', 'string', 'max:100'],
-            'items.*.ups_piller_input'            => ['nullable', 'string', 'max:100'],
-            'items.*.ups_piller_output'           => ['nullable', 'string', 'max:100'],
-            'items.*.panel_milat_ru11'            => ['nullable', 'string', 'max:100'],
-            'facilities'                          => ['sometimes', 'array'],
-            'facilities.*.id'                     => ['required_with:facilities', 'integer'],
-            'facilities.*.kondisi'                => ['nullable', 'string', 'in:Baik,Normal,Tidak Baik'],
-            'facilities.*.keterangan'             => ['nullable', 'string', 'max:500'],
+            'time_filled'      => ['nullable', 'string', 'regex:/^([01]\d|2[0-3]):[0-5]\d$/'],
+
+            'items'            => ['required', 'array', 'min:1'],
+            'items.*.id'       => ['required', 'integer'],
+            'items.*.values'   => ['nullable', 'array'],
+            'items.*.values.*' => ['nullable'],
+
+            'facilities'              => ['sometimes', 'array'],
+            'facilities.*.id'         => ['required_with:facilities', 'integer'],
+            'facilities.*.kondisi'    => ['nullable', 'string', 'in:Baik,Rusak,Tidak Ada'],
+            'facilities.*.keterangan' => ['nullable', 'string', 'max:500'],
         ];
     }
 
     public function messages(): array
     {
         return [
+            'time_filled.regex'       => 'Waktu pengisian harus dalam format HH:MM.',
             'items.required'          => 'Minimal satu item harus disertakan.',
             'items.*.id.required'     => 'Setiap item wajib menyertakan id.',
-            'facilities.*.kondisi.in' => 'Kondisi harus salah satu dari: Baik, Normal, Tidak Baik.',
+            'facilities.*.kondisi.in' => 'Kondisi harus salah satu dari: Baik, Rusak, Tidak Ada.',
         ];
     }
 }
