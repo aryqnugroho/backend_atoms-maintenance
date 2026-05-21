@@ -116,7 +116,9 @@ class WorkOrderController extends Controller
             return $this->error('Unauthorized. You cannot update this work order.', null, 403);
         }
 
-        $oldStatus = $workOrder->status;
+        $oldStatus              = $workOrder->status;
+        $oldDescription         = $workOrder->description;
+        $oldNotesPemberi        = $workOrder->notes_pemberi_tugas;
 
         $workOrder = $this->workOrderService->updateWorkOrder(
             $workOrder,
@@ -127,6 +129,18 @@ class WorkOrderController extends Controller
         $newStatus = $workOrder->status;
         if ($oldStatus !== $newStatus) {
             $this->notificationService->notifyStatusChanged($workOrder, $oldStatus, $newStatus, $user);
+        }
+
+        // Send notification if description / notes_pemberi_tugas changed
+        $changedFields = [];
+        if ($oldDescription !== $workOrder->description) {
+            $changedFields[] = 'description';
+        }
+        if ($oldNotesPemberi !== $workOrder->notes_pemberi_tugas) {
+            $changedFields[] = 'notes_pemberi_tugas';
+        }
+        if (!empty($changedFields)) {
+            $this->notificationService->notifyWorkOrderEdited($workOrder, $changedFields, $user);
         }
 
         return $this->success(

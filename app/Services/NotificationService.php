@@ -5,10 +5,16 @@ namespace App\Services;
 use App\Models\Cnsd\CnsdReadinessRecord;
 use App\Models\LocalUser;
 use App\Models\WorkOrder\WorkOrder;
+use App\Notifications\CnsdMeterReadingCreatedNotification;
 use App\Notifications\CnsdReadinessCompletedNotification;
 use App\Notifications\CnsdReadinessCreatedNotification;
 use App\Notifications\WorkOrderCreatedNotification;
+use App\Notifications\WorkOrderEditedNotification;
+use App\Notifications\WorkOrderShiftEndingReminderNotification;
 use App\Notifications\WorkOrderStatusChangedNotification;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Notifications\DatabaseNotification;
+use Illuminate\Support\Carbon;
 
 class NotificationService
 {
@@ -175,6 +181,119 @@ class NotificationService
                 $assignment->user->notify(new WorkOrderStatusChangedNotification($workOrder, $oldStatus, $newStatus, $changedBy));
                 $notifiedIds[] = $assignment->user->id;
             }
+        }
+    }
+
+    /**
+     * Notify assigned personnel when a work order is edited (description/notes).
+     *
+     * Audience matches notifyWorkOrderCreated: assigned manager + supervisor
+     * + assigned_technician + every WorkOrderPersonnel.user. The editor
+     * themselves is excluded.
+     *
+     * @param  array<int,string>  $changedFields  field names that actually changed
+     */
+    public function notifyWorkOrderEdited(WorkOrder $workOrder, array $changedFields, LocalUser $editedBy): void
+    {
+        if (empty($changedFields)) {
+            return;
+        }
+
+        $workOrder->loadMissing(['personnel.user', 'manager', 'supervisor']);
+
+        $notifiedIds = [$editedBy->id];
+
+        $candidates = collect();
+        if ($workOrder->manager)    { $candidates->push($workOrder->manager); }
+        if ($workOrder->supervisor) { $candidates->push($workOrder->supervisor); }
+        if ($workOrder->assigned_technician_id) {
+            $tech = LocalUser::find($workOrder->assigned_technician_id);
+            if ($tech) { $candidates->push($tech); }
+        }
+        foreach ($workOrder->personnel as $assignment) {
+            if ($assignment->user) { $candidates->push($assignment->user); }
+        }
+
+        foreach ($candidates as $user) {
+            if (in_array($user->id, $notifiedIds, true)) {
+                continue;
+            }
+            $user->notify(new WorkOrderEditedNotification($workOrder, $changedFields, $editedBy));
+            $notifiedIds[] = $user->id;
+        }
+    }
+
+    /**
+     * Send a "shift ending in ~10 minutes" reminder to the specific role-holder
+     * whose signature is still pending on the given work order.
+     *
+     * Idempotency: skip if the same user has already received a reminder for
+     * this WO + role within the last 30 minutes. Prevents duplicates from
+     * cron drift inside the [9, 11] minute sending window.
+     *
+     * @param  string  $role  'mt' | 'supervisor' | 'technician'
+     */
+    public function notifyShiftEndingUnsigned(WorkOrder $workOrder, LocalUser $user, string $role): bool
+    {
+        $recent = DatabaseNotification::query()
+            ->where('notifiable_id', $user->id)
+            ->where('notifiable_type', get_class($user))
+            ->where('type', WorkOrderShiftEndingReminderNotification::class)
+            ->where('created_at', '>=', Carbon::now()->subMinutes(30))
+            ->where('data->wo_id', $workOrder->id)
+            ->where('data->role', $role)
+            ->exists();
+
+        if ($recent) {
+            return false;
+        }
+
+        $user->notify(new WorkOrderShiftEndingReminderNotification($workOrder, $role));
+        return true;
+    }
+
+    /**
+     * Notify Manager Teknik, Supervisor CNSD, and assigned technicians when a
+     * CNSD Meter Reading record is created. The record param accepts any of
+     * the 12 meter-reading record models — all share manager_id / supervisor_id
+     * / technicians relation / shift_type / date / form_number columns.
+     *
+     * @param  Model   $record     Meter reading record (any of the 12 *MeterRecord models).
+     * @param  string  $facility   Human-readable facility (e.g. "ATC SYSTEM").
+     * @param  string  $route      Frontend list route (e.g. "/cnsd/atc-system-meter").
+     */
+    public function notifyCnsdMeterReadingCreated(Model $record, string $facility, string $route, LocalUser $creator): void
+    {
+        $record->loadMissing('technicians');
+
+        $notifiedIds  = [$creator->id];
+        $candidateIds = [];
+
+        if ($record->manager_id)    { $candidateIds[] = (int) $record->manager_id; }
+        if ($record->supervisor_id) { $candidateIds[] = (int) $record->supervisor_id; }
+        foreach ($record->technicians as $tech) {
+            if ($tech->technician_id) {
+                $candidateIds[] = (int) $tech->technician_id;
+            }
+        }
+
+        $shiftType = (string) $record->shift_type;
+        $date      = $record->date instanceof Carbon ? $record->date->format('Y-m-d') : (string) $record->date;
+        $recordId  = (int) $record->id;
+        $formNum   = (string) $record->form_number;
+
+        foreach (array_unique($candidateIds) as $userId) {
+            if (in_array($userId, $notifiedIds, true)) {
+                continue;
+            }
+            $user = LocalUser::find($userId);
+            if (!$user) {
+                continue;
+            }
+            $user->notify(new CnsdMeterReadingCreatedNotification(
+                $facility, $formNum, $recordId, $route, $shiftType, $date, $creator
+            ));
+            $notifiedIds[] = $userId;
         }
     }
 }
