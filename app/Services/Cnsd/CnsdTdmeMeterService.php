@@ -164,9 +164,20 @@ class CnsdTdmeMeterService
 
     public function updateItems(CnsdTdmeMeterRecord $record, array $items): CnsdTdmeMeterRecord
     {
+        return $this->updateRecord($record, ['items' => $items]);
+    }
+
+    public function updateRecord(CnsdTdmeMeterRecord $record, array $data): CnsdTdmeMeterRecord
+    {
         if ($record->status === 'completed') throw new RuntimeException('Form yang sudah completed tidak dapat diubah lagi.');
 
-        return DB::transaction(function () use ($record, $items) {
+        return DB::transaction(function () use ($record, $data) {
+            foreach (['merk', 'type', 'serial_number', 'tx1_mode', 'tx2_mode'] as $field) {
+                if (array_key_exists($field, $data)) $record->{$field} = $data[$field];
+            }
+            if ($record->isDirty()) $record->save();
+
+            $items = $data['items'] ?? [];
             $existing = $record->items()->get()->keyBy('id');
 
             foreach ($items as $payload) {

@@ -2,26 +2,22 @@
 
 namespace App\Services\Logbook;
 
+use App\Exceptions\SignerNotAuthorizedException;
 use App\Models\LocalUser;
 use App\Models\Logbook\CnsdEquipment;
 use App\Models\Logbook\LogbookCnsd;
 use App\Models\Logbook\LogbookCnsdItem;
 use App\Services\RosteringIntegrationService;
 use App\Services\SignatureAuthorizationService;
+use App\Services\WorkOrderService;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
 use RuntimeException;
 
 /**
- * LogbookCnsdService — orchestrates the daily CNSD (CNS & Automation) Logbook.
- *
- * One logbook per calendar date (unique constraint).
- * Personnel on duty is resolved from rostering for all 3 shifts of that date
- * filtered by `employee_type='CNS'`.
- *
- * Manager Teknik signs the logbook (role-based delegation applies). Hard delete
- * is used so the unique `date` constraint releases on delete.
+ * LogbookCnsdService — daily CNSD logbook with per-shift signatures.
+ * Mirror of LogbookTfpService.
  */
 class LogbookCnsdService
 {
@@ -34,38 +30,33 @@ class LogbookCnsdService
     public function listLogbooks(array $filters, int $perPage = 15): LengthAwarePaginator
     {
         $query = LogbookCnsd::query()
-            ->with(['manager:id,name', 'creator:id,name'])
+            ->with(['creator:id,name'])
             ->withCount('notes');
 
         if (!empty($filters['year'])) {
             $query->byYear((int) $filters['year']);
         }
-
         if (!empty($filters['month'])) {
             $query->whereMonth('date', (int) $filters['month']);
         }
-
         if (!empty($filters['signed'])) {
             if ($filters['signed'] === 'yes') {
-                $query->whereNotNull('manager_signature');
+                $query->whereNotNull('manager_signature_pagi')
+                    ->whereNotNull('manager_signature_siang')
+                    ->whereNotNull('manager_signature_malam');
             } elseif ($filters['signed'] === 'no') {
-                $query->whereNull('manager_signature');
+                $query->whereNull('manager_signature_pagi')
+                    ->whereNull('manager_signature_siang')
+                    ->whereNull('manager_signature_malam');
             }
         }
 
-        return $query
-            ->orderByDesc('date')
-            ->paginate($perPage);
+        return $query->orderByDesc('date')->paginate($perPage);
     }
 
     public function findLogbook(int $id): ?LogbookCnsd
     {
-        return LogbookCnsd::with([
-            'items.equipment',
-            'notes',
-            'manager:id,name',
-            'creator:id,name',
-        ])->find($id);
+        return LogbookCnsd::with(['items.equipment', 'notes', 'creator:id,name'])->find($id);
     }
 
     public function getAvailableYears(): array
@@ -82,7 +73,6 @@ class LogbookCnsdService
         if (!in_array($currentYear, $years, true)) {
             array_unshift($years, $currentYear);
         }
-
         return $years;
     }
 
@@ -120,12 +110,7 @@ class LogbookCnsdService
                     LogbookCnsdItem::insert($itemRows);
                 }
 
-                return $logbook->fresh([
-                    'items.equipment',
-                    'notes',
-                    'manager:id,name',
-                    'creator:id,name',
-                ]);
+                return $logbook->fresh(['items.equipment', 'notes', 'creator:id,name']);
             });
         } catch (\Illuminate\Database\UniqueConstraintViolationException $e) {
             throw new RuntimeException("Logbook CNSD untuk tanggal {$date} sudah ada.");
@@ -139,18 +124,11 @@ class LogbookCnsdService
 
     // ─── Personnel On Duty ─────────────────────────────────────
 
-    /**
-     * Batch-resolve Manager Teknik per shift for a list of dates.
-     */
     public function getManagersOnDutyForDates(array $dates): array
     {
         return $this->rosteringService->getShiftManagersForDates($dates);
     }
 
-    /**
-     * Resolve personnel on duty (CNSD scope) for all 3 shifts of the logbook date.
-     * Technician filter: employee_type='CNS'. Supervisor uses CNS division.
-     */
     public function getPersonnelOnDuty(string $date): array
     {
         $shifts = ['pagi', 'siang', 'malam'];
@@ -163,7 +141,6 @@ class LogbookCnsdService
                 $manager        = $context['manager'] ?? null;
                 $supervisorCnsd = $context['supervisor_cnsd'] ?? null;
 
-                // CNSD technicians: employee_type = 'CNS'
                 $personnel = collect($context['personnel'] ?? [])
                     ->filter(fn ($p) => ($p->employee_type ?? '') === 'CNS')
                     ->values();
@@ -186,7 +163,6 @@ class LogbookCnsdService
                 ];
             }
         }
-
         return $result;
     }
 
@@ -210,50 +186,33 @@ class LogbookCnsdService
             'status_malam'      => null,
         ]);
 
-        return $logbook->fresh(['items.equipment', 'notes', 'manager:id,name', 'creator:id,name']);
+        return $logbook->fresh(['items.equipment', 'notes', 'creator:id,name']);
     }
 
     public function editEquipmentInLogbook(LogbookCnsd $logbook, int $itemId, array $data): LogbookCnsd
     {
         $item = $logbook->items()->where('id', $itemId)->first();
-        if (!$item) {
-            throw new RuntimeException('Item peralatan tidak ditemukan.');
-        }
+        if (!$item) throw new RuntimeException('Item peralatan tidak ditemukan.');
         $equipment = $item->equipment;
-        if (!$equipment) {
-            throw new RuntimeException('Data peralatan tidak ditemukan.');
-        }
+        if (!$equipment) throw new RuntimeException('Data peralatan tidak ditemukan.');
 
-        if (isset($data['name'])) {
-            $equipment->name = $data['name'];
-        }
-        if (isset($data['category'])) {
-            $equipment->category = $data['category'];
-        }
+        if (isset($data['name'])) $equipment->name = $data['name'];
+        if (isset($data['category'])) $equipment->category = $data['category'];
         $equipment->save();
 
-        return $logbook->fresh(['items.equipment', 'notes', 'manager:id,name', 'creator:id,name']);
+        return $logbook->fresh(['items.equipment', 'notes', 'creator:id,name']);
     }
 
     public function removeEquipmentFromLogbook(LogbookCnsd $logbook, int $itemId): LogbookCnsd
     {
         $item = $logbook->items()->where('id', $itemId)->first();
-        if (!$item) {
-            throw new RuntimeException('Item peralatan tidak ditemukan.');
-        }
+        if (!$item) throw new RuntimeException('Item peralatan tidak ditemukan.');
         $item->delete();
-
-        return $logbook->fresh(['items.equipment', 'notes', 'manager:id,name', 'creator:id,name']);
+        return $logbook->fresh(['items.equipment', 'notes', 'creator:id,name']);
     }
 
     // ─── Update Items ──────────────────────────────────────────
 
-    /**
-     * Update S/US status (and optionally measurement values) for equipment items.
-     *
-     * Each item payload may carry either status_* or value_* fields. Unknown keys
-     * are ignored. value_* fields are validated as plain strings ≤ 30 chars.
-     */
     public function updateItems(LogbookCnsd $logbook, array $items): LogbookCnsd
     {
         return DB::transaction(function () use ($logbook, $items) {
@@ -265,7 +224,9 @@ class LogbookCnsdService
 
                 $fields = [];
                 foreach (['status_pagi', 'status_siang', 'status_malam'] as $k) {
-                    if (array_key_exists($k, $payload)) $fields[$k] = $payload[$k];
+                    if (array_key_exists($k, $payload)) {
+                        $fields[$k] = $payload[$k];
+                    }
                 }
                 foreach (['value_pagi', 'value_siang', 'value_malam'] as $k) {
                     if (array_key_exists($k, $payload)) {
@@ -280,7 +241,23 @@ class LogbookCnsdService
                 }
             }
 
-            return $logbook->fresh(['items.equipment', 'notes', 'manager:id,name', 'creator:id,name']);
+            return $logbook->fresh(['items.equipment', 'notes', 'creator:id,name']);
+        });
+    }
+
+    /**
+     * Bulk-set status for all items of one shift.
+     */
+    public function bulkSetShiftStatus(LogbookCnsd $logbook, string $shift, ?string $status, bool $overwrite = true): LogbookCnsd
+    {
+        $col = "status_{$shift}";
+        return DB::transaction(function () use ($logbook, $col, $status, $overwrite) {
+            $query = $logbook->items();
+            if (!$overwrite) {
+                $query->whereNull($col);
+            }
+            $query->update([$col => $status, 'updated_at' => now()]);
+            return $logbook->fresh(['items.equipment', 'notes', 'creator:id,name']);
         });
     }
 
@@ -304,15 +281,13 @@ class LogbookCnsdService
             'activity' => $activityWithReporter,
         ]);
 
-        return $logbook->fresh(['items.equipment', 'notes', 'manager:id,name', 'creator:id,name']);
+        return $logbook->fresh(['items.equipment', 'notes', 'creator:id,name']);
     }
 
     public function deleteNote(LogbookCnsd $logbook, int $noteId): void
     {
         $note = $logbook->notes()->where('id', $noteId)->first();
-        if (!$note) {
-            throw new RuntimeException('Catatan tidak ditemukan.');
-        }
+        if (!$note) throw new RuntimeException('Catatan tidak ditemukan.');
         $note->delete();
     }
 
@@ -320,40 +295,51 @@ class LogbookCnsdService
 
     public function signLogbook(
         LogbookCnsd $logbook,
+        string $shift,
         string $base64Signature,
         LocalUser $signer,
     ): LogbookCnsd {
-        if (!empty($logbook->manager_signature)) {
-            throw new RuntimeException('Logbook sudah ditandatangani dan tidak dapat diubah.');
+        if (!in_array($shift, ['pagi', 'siang', 'malam'], true)) {
+            throw new InvalidArgumentException("Shift '{$shift}' tidak valid.");
         }
 
-        // Manager slot: only Manager Teknik, own slot
+        if ($logbook->isShiftSigned($shift)) {
+            throw new RuntimeException("Tanda tangan untuk shift {$shift} sudah ada dan tidak dapat diubah.");
+        }
+
         SignatureAuthorizationService::authorize($signer, 'manager', null, null);
+
+        $rosterManager = $this->rosteringService->getShiftManager($shift, $logbook->date->format('Y-m-d'));
+        if (!$rosterManager) {
+            throw new SignerNotAuthorizedException(
+                "Tidak ada Manager Teknik yang ditugaskan untuk shift {$shift} pada tanggal " . $logbook->date->format('Y-m-d') . '.'
+            );
+        }
+        if (!WorkOrderService::namesMatch($rosterManager->name, $signer->name)) {
+            throw new SignerNotAuthorizedException(
+                "Slot tanda tangan shift {$shift} hanya dapat ditandatangani oleh {$rosterManager->name}."
+            );
+        }
 
         $this->validateBase64PngSignature($base64Signature);
 
-        $logbook->manager_signature      = $base64Signature;
-        $logbook->manager_signed_by_id   = $signer->id;
-        $logbook->manager_signed_by_name = $signer->name;
-        $logbook->manager_signed_by_role = $signer->role;
-        $logbook->manager_signed_at      = now();
+        $logbook->{"manager_signature_{$shift}"}       = $base64Signature;
+        $logbook->{"manager_signed_by_id_{$shift}"}    = $signer->id;
+        $logbook->{"manager_signed_by_name_{$shift}"}  = $signer->name;
+        $logbook->{"manager_signed_by_role_{$shift}"}  = $signer->role;
+        $logbook->{"manager_signed_at_{$shift}"}       = now();
         $logbook->save();
 
-        return $logbook->fresh([
-            'items.equipment',
-            'notes',
-            'manager:id,name',
-            'creator:id,name',
-        ]);
+        return $logbook->fresh(['items.equipment', 'notes', 'creator:id,name']);
     }
 
     // ─── Delete ────────────────────────────────────────────────
 
+    /**
+     * Hard-delete a logbook. Allowed even after signing — caller must confirm.
+     */
     public function deleteLogbook(LogbookCnsd $logbook): void
     {
-        if (!empty($logbook->manager_signature)) {
-            throw new RuntimeException('Logbook yang sudah ditandatangani tidak dapat dihapus.');
-        }
         $logbook->delete();
     }
 

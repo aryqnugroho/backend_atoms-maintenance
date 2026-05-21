@@ -119,26 +119,30 @@ class GroundingReportService
         $date              = $data['date'];
         $shiftType         = $data['shift_type'];
         $workUnit          = $data['work_unit'] ?? 'Cabang Surabaya';
+        $timeFilled        = $data['time_filled'] ?? now()->format('H:i');
         $equipmentName     = $data['equipment_name'];
         $equipmentLocation = $data['equipment_location'];
 
-        // Resolve roster personnel BEFORE wrapping in a transaction so that
-        // a missing TFP technician fails fast without partial state.
-        $rosterContext = $this->resolveRosterContext($shiftType, $date);
+        // Resolve personnel before the transaction so signer errors fail fast.
+        $personnelContext = $workUnit === 'Cabang Surabaya'
+            ? $this->resolveRosterContext($shiftType, $date)
+            : $this->resolveManualContext($data);
 
-        if (empty($rosterContext['technicians'])) {
+        if (empty($personnelContext['technicians'])) {
             throw new RuntimeException(
-                'Tidak ada teknisi TFP yang bertugas pada tanggal '
-                . $date . ' shift ' . $shiftType
-                . '. Pastikan roster sudah dipublish dan terdapat personel Support untuk shift ini.'
+                $workUnit === 'Cabang Surabaya'
+                    ? 'Tidak ada teknisi TFP yang bertugas pada tanggal '
+                        . $date . ' shift ' . $shiftType
+                        . '. Pastikan roster sudah dipublish dan terdapat personel Support untuk shift ini.'
+                    : 'Minimal satu pelaksana teknisi harus dipilih untuk cabang non-Surabaya.'
             );
         }
 
         return DB::transaction(function () use (
-            $date, $shiftType, $workUnit, $equipmentName, $equipmentLocation, $creator, $rosterContext
+            $date, $shiftType, $workUnit, $timeFilled, $equipmentName, $equipmentLocation, $creator, $personnelContext
         ) {
-            $manager    = $rosterContext['manager'];
-            $supervisor = $rosterContext['supervisor'];
+            $manager    = $personnelContext['manager'];
+            $supervisor = $personnelContext['supervisor'];
 
             // Derive day_name (Indonesian) from date
             $carbonDate = Carbon::parse($date);
@@ -157,7 +161,7 @@ class GroundingReportService
                 'report_number'      => $this->generateFormNumber($date),
                 'date'               => $date,
                 'day_name'           => $dayName,
-                'time_filled'        => now()->format('H:i'),
+                'time_filled'        => $timeFilled,
                 'shift_type'         => $shiftType,
                 'work_unit'          => $workUnit,
                 'equipment_name'     => $equipmentName,
@@ -173,7 +177,7 @@ class GroundingReportService
 
             // Seed technicians
             $sort = 0;
-            foreach ($rosterContext['technicians'] as $tech) {
+            foreach ($personnelContext['technicians'] as $tech) {
                 GroundingReportTechnician::create([
                     'grounding_report_record_id' => $record->id,
                     'technician_id'              => $tech['local_id'],
@@ -257,6 +261,66 @@ class GroundingReportService
     }
 
     /**
+     * Resolve manually selected signers for reports outside Surabaya.
+     */
+    private function resolveManualContext(array $data): array
+    {
+        $manager = LocalUser::query()
+            ->whereKey($data['manager_id'] ?? 0)
+            ->where('is_active', true)
+            ->where('role', 'Manager Teknik')
+            ->first();
+        if (!$manager) {
+            throw new RuntimeException('Manager Teknik yang dipilih tidak tersedia.');
+        }
+
+        $supervisor = LocalUser::query()
+            ->whereKey($data['supervisor_id'] ?? 0)
+            ->where('is_active', true)
+            ->where('role', 'Supervisor TFP')
+            ->first();
+        if (!$supervisor) {
+            throw new RuntimeException('Supervisor TFP yang dipilih tidak tersedia.');
+        }
+
+        $technicianIds = array_values(array_unique(array_map(
+            'intval',
+            $data['technician_ids'] ?? [],
+        )));
+
+        if (in_array((int) $supervisor->id, $technicianIds, true)) {
+            throw new RuntimeException('Supervisor TFP tidak dapat dipilih lagi sebagai pelaksana teknisi.');
+        }
+
+        $technicianRows = LocalUser::query()
+            ->whereIn('id', $technicianIds)
+            ->where('is_active', true)
+            ->whereIn('role', ['Teknisi TFP', 'Supervisor TFP'])
+            ->get(['id', 'name', 'rostering_user_id'])
+            ->keyBy('id');
+
+        if ($technicianRows->count() !== count($technicianIds)) {
+            throw new RuntimeException('Daftar pelaksana teknisi TFP yang dipilih tidak valid.');
+        }
+
+        $technicians = array_map(function (int $technicianId) use ($technicianRows): array {
+            $technician = $technicianRows->get($technicianId);
+
+            return [
+                'local_id' => $technician->id,
+                'name'     => $technician->name,
+                'user_id'  => $technician->rostering_user_id,
+            ];
+        }, $technicianIds);
+
+        return [
+            'manager'     => $manager,
+            'supervisor'  => $supervisor,
+            'technicians' => $technicians,
+        ];
+    }
+
+    /**
      * Generate a sequential report number for Grounding Report records.
      *
      * Format: GROUNDING-{YYMMDD}-{SEQ}
@@ -325,10 +389,6 @@ class GroundingReportService
                 }
                 $item->save();
             }
-
-            // Refresh time_filled to reflect when the user saved this snapshot.
-            $record->time_filled = now()->format('H:i');
-            $record->save();
 
             return $record->fresh([
                 'technicians',

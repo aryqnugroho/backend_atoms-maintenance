@@ -313,33 +313,52 @@ class CnsdRecorderMeterService
      */
     public function updateItems(CnsdRecorderMeterRecord $record, array $items): CnsdRecorderMeterRecord
     {
+        return $this->updateRecord($record, ['items' => $items]);
+    }
+
+    /**
+     * Update equipment metadata and/or item values on an existing record.
+     * Personnel, signatures, dates, form_number and U/S items are NOT touched.
+     */
+    public function updateRecord(CnsdRecorderMeterRecord $record, array $data): CnsdRecorderMeterRecord
+    {
         if ($record->status === 'completed') {
             throw new RuntimeException('Form yang sudah completed tidak dapat diubah lagi.');
         }
 
-        return DB::transaction(function () use ($record, $items) {
-            $existing = $record->items()->get()->keyBy('id');
-
-            foreach ($items as $payload) {
-                if (empty($payload['id']) || !$existing->has($payload['id'])) {
-                    continue; // ignore unknown item IDs
+        return DB::transaction(function () use ($record, $data) {
+            foreach (['merk', 'type', 'serial_number'] as $field) {
+                if (array_key_exists($field, $data)) {
+                    $record->{$field} = $data[$field];
                 }
+            }
+            if ($record->isDirty()) {
+                $record->save();
+            }
 
-                /** @var CnsdRecorderMeterItem $item */
-                $item = $existing->get($payload['id']);
+            if (!empty($data['items']) && is_array($data['items'])) {
+                $existing = $record->items()->get()->keyBy('id');
 
-                // Hard guard: blocked / U/S items cannot be edited.
-                if ($item->is_blocked) {
-                    continue;
+                foreach ($data['items'] as $payload) {
+                    if (empty($payload['id']) || !$existing->has($payload['id'])) {
+                        continue;
+                    }
+
+                    /** @var CnsdRecorderMeterItem $item */
+                    $item = $existing->get($payload['id']);
+
+                    if ($item->is_blocked) {
+                        continue;
+                    }
+
+                    $item->fill(array_intersect_key($payload, array_flip([
+                        'hasil_server_a',
+                        'hasil_server_b',
+                        'hasil',
+                        'keterangan',
+                    ])));
+                    $item->save();
                 }
-
-                $item->fill(array_intersect_key($payload, array_flip([
-                    'hasil_server_a',
-                    'hasil_server_b',
-                    'hasil',
-                    'keterangan',
-                ])));
-                $item->save();
             }
 
             return $record->fresh(['technicians', 'items', 'manager:id,name', 'supervisor:id,name']);

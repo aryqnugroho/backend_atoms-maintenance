@@ -133,7 +133,7 @@ class CnsdRadarMeterService
         $shiftType     = $data['shift_type'];
         $location      = $data['location']      ?? 'CABANG SURABAYA';
         $merk          = $data['merk']          ?? 'ELDIS';
-        $type          = $data['type']          ?? 'MSSR-1 / RL2000';
+        $type          = $data['type']          ?? '5SR-N-I FL2000';
         $serialNumber  = $data['serial_number'] ?? null;
 
         // Reject duplicate
@@ -297,44 +297,70 @@ class CnsdRadarMeterService
     // ─── Update ────────────────────────────────────────────────
 
     /**
-     * Update item values on an existing record. Personnel, signatures, dates,
-     * and form numbers are NOT touched here.
+     * Update item values + equipment metadata on an existing record. Personnel,
+     * signatures, date, shift, and form numbers are NOT touched here.
      *
-     * @param array<int, array{
-     *   id:int,
-     *   kondisi_teknis_tx1?:string|null,
-     *   kondisi_teknis_tx2?:string|null,
-     *   hasil?:string|null,
-     *   keterangan?:string|null
-     * }> $items
+     * @param array{
+     *   merk?:string|null,
+     *   type?:string|null,
+     *   serial_number?:string|null,
+     *   items?: array<int, array{
+     *     id:int,
+     *     kondisi_teknis_tx1?:string|null,
+     *     kondisi_teknis_tx2?:string|null,
+     *     hasil?:string|null,
+     *     keterangan?:string|null,
+     *   }>
+     * } $data
      */
-    public function updateItems(CnsdRadarMeterRecord $record, array $items): CnsdRadarMeterRecord
+    public function updateRecord(CnsdRadarMeterRecord $record, array $data): CnsdRadarMeterRecord
     {
         if ($record->status === 'completed') {
             throw new RuntimeException('Form yang sudah completed tidak dapat diubah lagi.');
         }
 
-        return DB::transaction(function () use ($record, $items) {
-            $existing = $record->items()->get()->keyBy('id');
-
-            foreach ($items as $payload) {
-                if (empty($payload['id']) || !$existing->has($payload['id'])) {
-                    continue; // ignore unknown item IDs
+        return DB::transaction(function () use ($record, $data) {
+            // Equipment metadata fields (header on paper form)
+            foreach (['merk', 'type', 'serial_number'] as $field) {
+                if (array_key_exists($field, $data)) {
+                    $record->{$field} = $data[$field];
                 }
+            }
+            if ($record->isDirty()) {
+                $record->save();
+            }
 
-                /** @var CnsdRadarMeterItem $item */
-                $item = $existing->get($payload['id']);
-                $item->fill(array_intersect_key($payload, array_flip([
-                    'kondisi_teknis_tx1',
-                    'kondisi_teknis_tx2',
-                    'hasil',
-                    'keterangan',
-                ])));
-                $item->save();
+            // Item value updates
+            if (!empty($data['items']) && is_array($data['items'])) {
+                $existing = $record->items()->get()->keyBy('id');
+
+                foreach ($data['items'] as $payload) {
+                    if (empty($payload['id']) || !$existing->has($payload['id'])) {
+                        continue; // ignore unknown item IDs
+                    }
+
+                    /** @var CnsdRadarMeterItem $item */
+                    $item = $existing->get($payload['id']);
+                    $item->fill(array_intersect_key($payload, array_flip([
+                        'kondisi_teknis_tx1',
+                        'kondisi_teknis_tx2',
+                        'hasil',
+                        'keterangan',
+                    ])));
+                    $item->save();
+                }
             }
 
             return $record->fresh(['technicians', 'items', 'manager:id,name', 'supervisor:id,name']);
         });
+    }
+
+    /**
+     * Legacy alias for backward-compatibility. Prefer `updateRecord()`.
+     */
+    public function updateItems(CnsdRadarMeterRecord $record, array $items): CnsdRadarMeterRecord
+    {
+        return $this->updateRecord($record, ['items' => $items]);
     }
 
     // ─── Sign ──────────────────────────────────────────────────

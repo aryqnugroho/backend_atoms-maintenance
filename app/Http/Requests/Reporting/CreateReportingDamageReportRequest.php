@@ -66,7 +66,7 @@ class CreateReportingDamageReportRequest extends FormRequest
             'facility.required'           => 'Fasilitas harus diisi.',
             'equipment_name.required'     => 'Nama peralatan harus diisi.',
             'damage_category.required'    => 'Kategori kerusakan harus dipilih.',
-            'damage_category.in'          => 'Kategori kerusakan harus Ringan, Sedang, atau Berat.',
+            'damage_category.in'          => 'Kategori kerusakan harus 1, 2, atau 3.',
             'damage_description.required' => 'Uraian kerusakan harus diisi.',
             'manager_id.required'         => 'Manager Teknik harus dipilih.',
             'manager_id.exists'           => 'Manager Teknik yang dipilih tidak ditemukan.',

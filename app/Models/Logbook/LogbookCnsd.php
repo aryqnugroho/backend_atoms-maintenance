@@ -9,11 +9,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 /**
  * LogbookCnsd — header logbook harian CNSD (CNS & Automation).
- * Satu record per tanggal (unique constraint on `date`).
- *
- * Menggunakan hard delete supaya unique constraint `date` benar-benar
- * dibebaskan saat logbook dihapus, sehingga tanggal yang sama bisa
- * dipakai kembali.
+ * Per-shift signature pattern, mirror of LogbookTfp.
  */
 class LogbookCnsd extends Model
 {
@@ -21,26 +17,19 @@ class LogbookCnsd extends Model
 
     protected $fillable = [
         'date',
-        'manager_signed_by_id',
-        'manager_signed_by_name',
-        'manager_signed_by_role',
-        'manager_signature',
-        'manager_signed_at',
+        'manager_signed_by_id_pagi',  'manager_signed_by_name_pagi',  'manager_signed_by_role_pagi',  'manager_signature_pagi',  'manager_signed_at_pagi',
+        'manager_signed_by_id_siang', 'manager_signed_by_name_siang', 'manager_signed_by_role_siang', 'manager_signature_siang', 'manager_signed_at_siang',
+        'manager_signed_by_id_malam', 'manager_signed_by_name_malam', 'manager_signed_by_role_malam', 'manager_signature_malam', 'manager_signed_at_malam',
         'created_by_id',
         'created_by_name',
     ];
 
     protected $casts = [
-        'date'              => 'date:Y-m-d',
-        'manager_signed_at' => 'datetime',
+        'date'                    => 'date:Y-m-d',
+        'manager_signed_at_pagi'  => 'datetime',
+        'manager_signed_at_siang' => 'datetime',
+        'manager_signed_at_malam' => 'datetime',
     ];
-
-    // ─── Relationships ─────────────────────────────────────────
-
-    public function manager(): BelongsTo
-    {
-        return $this->belongsTo(LocalUser::class, 'manager_signed_by_id');
-    }
 
     public function creator(): BelongsTo
     {
@@ -49,8 +38,7 @@ class LogbookCnsd extends Model
 
     public function items(): HasMany
     {
-        return $this->hasMany(LogbookCnsdItem::class, 'logbook_cnsd_id')
-            ->with('equipment');
+        return $this->hasMany(LogbookCnsdItem::class, 'logbook_cnsd_id')->with('equipment');
     }
 
     public function notes(): HasMany
@@ -60,11 +48,20 @@ class LogbookCnsd extends Model
             ->orderBy('time');
     }
 
-    // ─── Helpers ───────────────────────────────────────────────
-
-    public function isSigned(): bool
+    public function isShiftSigned(string $shift): bool
     {
-        return !empty($this->manager_signature);
+        $col = "manager_signature_{$shift}";
+        return !empty($this->{$col});
+    }
+
+    public function isPartiallySigned(): bool
+    {
+        return $this->isShiftSigned('pagi') || $this->isShiftSigned('siang') || $this->isShiftSigned('malam');
+    }
+
+    public function isFullySigned(): bool
+    {
+        return $this->isShiftSigned('pagi') && $this->isShiftSigned('siang') && $this->isShiftSigned('malam');
     }
 
     public function scopeByYear($q, int $year)

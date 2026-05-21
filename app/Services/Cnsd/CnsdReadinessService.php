@@ -171,6 +171,12 @@ class CnsdReadinessService
                 'shift_type'      => $shiftType,
                 'location'        => $location,
                 'room'            => $room,
+                // Seed sections_meta from the template so per-record renames
+                // and column-label edits survive without touching the template.
+                'sections_meta'   => match ($formType) {
+                    'EQ-1'  => CnsdEq1Template::sectionMeta(),
+                    default => [],
+                },
                 'status'          => 'ongoing',
                 'manager_id'      => $manager?->id,
                 'manager_name'    => $manager?->name,
@@ -327,6 +333,154 @@ class CnsdReadinessService
                     'keterangan',
                 ])));
                 $item->save();
+            }
+
+            return $record->fresh(['technicians', 'items', 'manager:id,name', 'supervisor:id,name']);
+        });
+    }
+
+    // ─── Structural edits (Manager / Supervisor only) ──────────
+
+    /**
+     * Add a new item row to the given section. The section must already exist
+     * in $record->sections_meta. New rows append to the end of the section.
+     *
+     * Returns the created CnsdReadinessItem.
+     */
+    public function addItem(
+        CnsdReadinessRecord $record,
+        string $sectionName,
+        array $payload,
+    ): CnsdReadinessItem {
+        if ($record->status === 'completed') {
+            throw new RuntimeException('Form yang sudah completed tidak dapat diubah lagi.');
+        }
+
+        $sectionsMeta = is_array($record->sections_meta) ? $record->sections_meta : [];
+        $sectionExists = collect($sectionsMeta)->contains(fn ($s) => ($s['name'] ?? null) === $sectionName);
+        if (!$sectionExists) {
+            throw new InvalidArgumentException('Section tidak ditemukan: ' . $sectionName);
+        }
+
+        // Compute new sort_order — last item in section + 1, or after all items
+        // if section is empty.
+        $maxSortInSection = (int) $record->items()
+            ->where('section_name', $sectionName)
+            ->max('sort_order');
+        $maxSortOverall = (int) $record->items()->max('sort_order');
+        $newSort = max($maxSortInSection, $maxSortOverall) + 1;
+
+        return CnsdReadinessItem::create([
+            'readiness_record_id'    => $record->id,
+            'section_name'           => $sectionName,
+            'item_number'            => $payload['item_number']          ?? null,
+            'equipment_name'         => $payload['equipment_name'],
+            'sub_equipment_name'     => $payload['sub_equipment_name']   ?? null,
+            'status_peralatan'       => $payload['status_peralatan']     ?? null,
+            'kondisi_operasional_1'  => $payload['kondisi_operasional_1'] ?? null,
+            'kondisi_operasional_2'  => $payload['kondisi_operasional_2'] ?? null,
+            'keterangan'             => $payload['keterangan']           ?? null,
+            'sort_order'             => $newSort,
+        ]);
+    }
+
+    /**
+     * Update structural fields of an item (equipment_name, sub_equipment_name,
+     * item_number). Value fields (status, kondisi, keterangan) are NOT touched
+     * here — use updateItems() for that.
+     */
+    public function updateItemStructure(
+        CnsdReadinessRecord $record,
+        int $itemId,
+        array $payload,
+    ): CnsdReadinessItem {
+        if ($record->status === 'completed') {
+            throw new RuntimeException('Form yang sudah completed tidak dapat diubah lagi.');
+        }
+
+        /** @var CnsdReadinessItem|null $item */
+        $item = $record->items()->where('id', $itemId)->first();
+        if (!$item) {
+            throw new InvalidArgumentException('Item tidak ditemukan: ' . $itemId);
+        }
+
+        $item->fill(array_intersect_key($payload, array_flip([
+            'item_number',
+            'equipment_name',
+            'sub_equipment_name',
+        ])));
+        $item->save();
+        return $item;
+    }
+
+    /**
+     * Delete an item row.
+     */
+    public function deleteItem(CnsdReadinessRecord $record, int $itemId): void
+    {
+        if ($record->status === 'completed') {
+            throw new RuntimeException('Form yang sudah completed tidak dapat diubah lagi.');
+        }
+
+        $record->items()->where('id', $itemId)->delete();
+    }
+
+    /**
+     * Rename a section heading. Updates both `sections_meta` JSON on the record
+     * and every item.section_name that matches the old name. Column labels can
+     * also be updated in the same call.
+     */
+    public function renameSection(
+        CnsdReadinessRecord $record,
+        string $oldName,
+        array $payload,
+    ): CnsdReadinessRecord {
+        if ($record->status === 'completed') {
+            throw new RuntimeException('Form yang sudah completed tidak dapat diubah lagi.');
+        }
+
+        $newName = isset($payload['name']) ? trim((string) $payload['name']) : $oldName;
+        if ($newName === '') {
+            throw new InvalidArgumentException('Nama section tidak boleh kosong.');
+        }
+
+        $sectionsMeta = is_array($record->sections_meta) ? $record->sections_meta : [];
+        $found = false;
+        foreach ($sectionsMeta as $idx => $section) {
+            if (($section['name'] ?? null) === $oldName) {
+                $sectionsMeta[$idx]['name'] = $newName;
+                if (array_key_exists('columns_label_1', $payload)) {
+                    $sectionsMeta[$idx]['columns_label_1'] = $payload['columns_label_1'];
+                }
+                if (array_key_exists('columns_label_2', $payload)) {
+                    $sectionsMeta[$idx]['columns_label_2'] = $payload['columns_label_2'];
+                }
+                $found = true;
+                break;
+            }
+        }
+        if (!$found) {
+            throw new InvalidArgumentException('Section tidak ditemukan: ' . $oldName);
+        }
+
+        // Block name collision with another section.
+        if ($newName !== $oldName) {
+            $collision = collect($sectionsMeta)
+                ->filter(fn ($s, $i) => ($s['name'] ?? null) === $newName)
+                ->count();
+            if ($collision > 1) {
+                throw new InvalidArgumentException('Nama section "' . $newName . '" sudah dipakai oleh section lain.');
+            }
+        }
+
+        return DB::transaction(function () use ($record, $oldName, $newName, $sectionsMeta) {
+            $record->sections_meta = $sectionsMeta;
+            $record->save();
+
+            if ($newName !== $oldName) {
+                $record->items()
+                    ->where('section_name', $oldName)
+                    ->update(['section_name' => $newName]);
             }
 
             return $record->fresh(['technicians', 'items', 'manager:id,name', 'supervisor:id,name']);

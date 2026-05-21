@@ -108,7 +108,7 @@ class CnsdReceiverMeterService
         $date      = $data['date'];
         $shiftType = $data['shift_type'];
         $location  = $data['location']   ?? 'Kantor Cabang Surabaya';
-        $merk      = $data['merk']       ?? null;
+        $merk      = $data['merk']       ?? 'OTE / PAE / TELERAD';
         $type      = $data['type']       ?? null;
         $sn        = $data['serial_number'] ?? null;
 
@@ -259,58 +259,79 @@ class CnsdReceiverMeterService
     // ─── Update ────────────────────────────────────────────────
 
     /**
-     * Update item values on an existing record. Personnel, signatures, dates,
-     * and form numbers are NOT touched here.
+     * Update equipment metadata (merk/type/serial_number) and item values on
+     * an existing record. Personnel, signatures, dates, and form numbers are
+     * NOT touched here.
      */
-    public function updateItems(CnsdReceiverMeterRecord $record, array $items): CnsdReceiverMeterRecord
+    public function updateRecord(CnsdReceiverMeterRecord $record, array $data): CnsdReceiverMeterRecord
     {
         if ($record->status === 'completed') {
             throw new RuntimeException('Form yang sudah completed tidak dapat diubah lagi.');
         }
 
-        return DB::transaction(function () use ($record, $items) {
-            $existing = $record->items()->get()->keyBy('id');
-
-            foreach ($items as $payload) {
-                if (empty($payload['id']) || !$existing->has($payload['id'])) {
-                    continue;
+        return DB::transaction(function () use ($record, $data) {
+            foreach (['merk', 'type', 'serial_number'] as $field) {
+                if (array_key_exists($field, $data)) {
+                    $record->{$field} = $data[$field];
                 }
-
-                /** @var CnsdReceiverMeterItem $item */
-                $item = $existing->get($payload['id']);
-
-                // Skip header rows
-                if ($item->is_header) {
-                    continue;
-                }
-
-                if ($item->section_code === '2') {
-                    // Environment items
-                    $envFillable = ['hasil', 'keterangan'];
-                    foreach ($envFillable as $col) {
-                        if (array_key_exists($col, $payload)) {
-                            $item->{$col} = $payload[$col];
-                        }
-                    }
-                } else {
-                    // Receiver frequency items
-                    $fillable = ['status_a', 'status_b', 'sequelsh_on', 'keterangan'];
-                    foreach ($fillable as $col) {
-                        if (array_key_exists($col, $payload)) {
-                            $item->{$col} = $payload[$col];
-                        }
-                    }
-                }
-                $item->save();
+            }
+            if ($record->isDirty()) {
+                $record->save();
             }
 
-            // Refresh time_filled on every save
+            if (!empty($data['items']) && is_array($data['items'])) {
+                $this->applyItemUpdates($record, $data['items']);
+            }
+
             $record->time_filled = now()->format('H:i');
             $record->save();
 
             $record->refresh();
             return $record->load(['technicians', 'items', 'manager:id,name', 'supervisor:id,name']);
         });
+    }
+
+    /**
+     * Legacy alias kept for backward compatibility with previous controller code.
+     */
+    public function updateItems(CnsdReceiverMeterRecord $record, array $items): CnsdReceiverMeterRecord
+    {
+        return $this->updateRecord($record, ['items' => $items]);
+    }
+
+    private function applyItemUpdates(CnsdReceiverMeterRecord $record, array $items): void
+    {
+        $existing = $record->items()->get()->keyBy('id');
+
+        foreach ($items as $payload) {
+            if (empty($payload['id']) || !$existing->has($payload['id'])) {
+                continue;
+            }
+
+            /** @var CnsdReceiverMeterItem $item */
+            $item = $existing->get($payload['id']);
+
+            if ($item->is_header) {
+                continue;
+            }
+
+            if ($item->section_code === '2') {
+                $envFillable = ['hasil', 'keterangan'];
+                foreach ($envFillable as $col) {
+                    if (array_key_exists($col, $payload)) {
+                        $item->{$col} = $payload[$col];
+                    }
+                }
+            } else {
+                $fillable = ['status_a', 'status_b', 'sequelsh_on', 'keterangan'];
+                foreach ($fillable as $col) {
+                    if (array_key_exists($col, $payload)) {
+                        $item->{$col} = $payload[$col];
+                    }
+                }
+            }
+            $item->save();
+        }
     }
 
     // ─── Sign ──────────────────────────────────────────────────

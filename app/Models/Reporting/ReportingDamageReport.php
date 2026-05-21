@@ -68,7 +68,7 @@ class ReportingDamageReport extends Model
     ];
 
     public const STATUSES         = ['ongoing', 'on_hold', 'completed'];
-    public const DAMAGE_CATEGORIES = ['Ringan', 'Sedang', 'Berat'];
+    public const DAMAGE_CATEGORIES = ['1', '2', '3'];
     public const REPAIR_BY_TYPES  = ['lokasi', 'pusat'];
 
     public const OBSTACLE_CODES = [

@@ -252,37 +252,55 @@ class CnsdAmscMeterService
      */
     public function updateItems(CnsdAmscMeterRecord $record, array $items): CnsdAmscMeterRecord
     {
+        return $this->updateRecord($record, ['items' => $items]);
+    }
+
+    /**
+     * Update metadata (merk/type/serial_number) and/or item values on the record.
+     * Personnel, signatures, dates and form_number are NOT touched. Blocked
+     * items are silently skipped.
+     */
+    public function updateRecord(CnsdAmscMeterRecord $record, array $data): CnsdAmscMeterRecord
+    {
         if ($record->status === 'completed') {
             throw new RuntimeException('Form yang sudah completed tidak dapat diubah lagi.');
         }
 
-        return DB::transaction(function () use ($record, $items) {
-            $existing = $record->items()->get()->keyBy('id');
-
-            foreach ($items as $payload) {
-                if (empty($payload['id']) || !$existing->has($payload['id'])) {
-                    continue;
+        return DB::transaction(function () use ($record, $data) {
+            foreach (['merk', 'type', 'serial_number'] as $field) {
+                if (array_key_exists($field, $data)) {
+                    $record->{$field} = $data[$field];
                 }
-
-                /** @var CnsdAmscMeterItem $item */
-                $item = $existing->get($payload['id']);
-
-                // Skip blocked items
-                if ($item->is_blocked) {
-                    continue;
-                }
-
-                // Only update allowed value columns
-                $fillable = ['hasil_a', 'hasil_b', 'hasil', 'status_value', 'cct', 'keterangan'];
-                foreach ($fillable as $col) {
-                    if (array_key_exists($col, $payload)) {
-                        $item->{$col} = $payload[$col];
-                    }
-                }
-                $item->save();
+            }
+            if ($record->isDirty()) {
+                $record->save();
             }
 
-            // Refresh time_filled on every save (mirrors TFP AOB Ground pattern)
+            if (!empty($data['items']) && is_array($data['items'])) {
+                $existing = $record->items()->get()->keyBy('id');
+
+                foreach ($data['items'] as $payload) {
+                    if (empty($payload['id']) || !$existing->has($payload['id'])) {
+                        continue;
+                    }
+
+                    /** @var CnsdAmscMeterItem $item */
+                    $item = $existing->get($payload['id']);
+
+                    if ($item->is_blocked) {
+                        continue;
+                    }
+
+                    $fillable = ['hasil_a', 'hasil_b', 'hasil', 'status_value', 'cct', 'keterangan'];
+                    foreach ($fillable as $col) {
+                        if (array_key_exists($col, $payload)) {
+                            $item->{$col} = $payload[$col];
+                        }
+                    }
+                    $item->save();
+                }
+            }
+
             $record->time_filled = now()->format('H:i');
             $record->save();
 

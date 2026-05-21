@@ -164,19 +164,26 @@ class CnsdDvorMeterService
 
     public function updateItems(CnsdDvorMeterRecord $record, array $data): CnsdDvorMeterRecord
     {
+        return $this->updateRecord($record, $data);
+    }
+
+    public function updateRecord(CnsdDvorMeterRecord $record, array $data): CnsdDvorMeterRecord
+    {
         if ($record->status === 'completed') throw new RuntimeException('Form yang sudah completed tidak dapat diubah lagi.');
 
         return DB::transaction(function () use ($record, $data) {
-            // Update tx modes if provided
-            $changed = false;
+            // Equipment metadata
+            foreach (['merk', 'type', 'serial_number'] as $field) {
+                if (array_key_exists($field, $data)) $record->{$field} = $data[$field];
+            }
+            // Tx modes
             if (isset($data['tx1_mode']) && in_array($data['tx1_mode'], ['MAIN', 'STANDBY'], true)) {
                 $record->tx1_mode = $data['tx1_mode'];
-                $changed = true;
             }
             if (isset($data['tx2_mode']) && in_array($data['tx2_mode'], ['MAIN', 'STANDBY'], true)) {
                 $record->tx2_mode = $data['tx2_mode'];
-                $changed = true;
             }
+            if ($record->isDirty()) $record->save();
 
             $existing = $record->items()->get()->keyBy('id');
             foreach ($data['items'] ?? [] as $payload) {

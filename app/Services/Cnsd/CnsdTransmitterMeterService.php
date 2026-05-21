@@ -246,6 +246,12 @@ class CnsdTransmitterMeterService
      * Update item values on an existing record. Personnel, signatures, dates,
      * and form numbers are NOT touched here.
      */
+    public function updateRecord(CnsdTransmitterMeterRecord $record, array $data): CnsdTransmitterMeterRecord
+    {
+        // Transmitter has no equipment-level metadata (merk/type/sn are per-item).
+        return $this->updateItems($record, $data['items'] ?? []);
+    }
+
     public function updateItems(CnsdTransmitterMeterRecord $record, array $items): CnsdTransmitterMeterRecord
     {
         if ($record->status === 'completed') {
