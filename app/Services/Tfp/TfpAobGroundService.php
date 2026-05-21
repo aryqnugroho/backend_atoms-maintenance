@@ -428,6 +428,195 @@ class TfpAobGroundService
         });
     }
 
+    // ─── Structural edit (parameters) ──────────────────────────
+    //
+    // Edit Mode is restricted to Manager Teknik / Supervisor TFP / Admin —
+    // enforced at the controller layer. The service trusts the caller and
+    // operates on data only.
+
+    public function addParameter(TfpAobGroundRecord $record, array $data): TfpAobGroundRecord
+    {
+        if ($record->status === 'completed') {
+            throw new RuntimeException('Form yang sudah completed tidak dapat diubah strukturnya.');
+        }
+
+        $maxSort = (int) ($record->items()->max('sort_order') ?? -1);
+
+        TfpAobGroundItem::create([
+            'aob_ground_record_id' => $record->id,
+            'parameter_number'     => $data['parameter_number'] ?? (string) ($maxSort + 2),
+            'parameter_name'       => trim((string) $data['parameter_name']),
+            'unit'                 => isset($data['unit']) ? trim((string) $data['unit']) : null,
+            'panel_cos_a03_input'  => null,
+            'panel_cos_a03_output' => null,
+            'panel_ats_a12_input'  => null,
+            'panel_ats_a12_output' => null,
+            'ups_tescom_a_input'   => null,
+            'ups_tescom_a_output'  => null,
+            'ups_tescom_b_input'   => null,
+            'ups_tescom_b_output'  => null,
+            // New parameters default to "all cells enabled" — Manager can adjust
+            // disabled cells later if a dedicated UI for it is added.
+            'is_disabled_map'      => null,
+            'sort_order'           => $maxSort + 1,
+        ]);
+
+        return $this->fresh($record);
+    }
+
+    public function updateParameterStructure(TfpAobGroundRecord $record, int $paramId, array $data): TfpAobGroundRecord
+    {
+        if ($record->status === 'completed') {
+            throw new RuntimeException('Form yang sudah completed tidak dapat diubah strukturnya.');
+        }
+
+        /** @var TfpAobGroundItem|null $item */
+        $item = $record->items()->where('id', $paramId)->first();
+        if (!$item) {
+            throw new InvalidArgumentException('Parameter tidak ditemukan.');
+        }
+
+        $patch = [];
+        if (array_key_exists('parameter_name', $data)) {
+            $patch['parameter_name'] = trim((string) $data['parameter_name']);
+        }
+        if (array_key_exists('parameter_number', $data)) {
+            $patch['parameter_number'] = $data['parameter_number'] !== null && $data['parameter_number'] !== ''
+                ? trim((string) $data['parameter_number']) : null;
+        }
+        if (array_key_exists('unit', $data)) {
+            $patch['unit'] = $data['unit'] !== null && $data['unit'] !== ''
+                ? trim((string) $data['unit']) : null;
+        }
+
+        if (!empty($patch)) {
+            $item->fill($patch);
+            $item->save();
+        }
+
+        return $this->fresh($record);
+    }
+
+    public function deleteParameter(TfpAobGroundRecord $record, int $paramId): TfpAobGroundRecord
+    {
+        if ($record->status === 'completed') {
+            throw new RuntimeException('Form yang sudah completed tidak dapat diubah strukturnya.');
+        }
+
+        $deleted = $record->items()->where('id', $paramId)->delete();
+        if ($deleted === 0) {
+            throw new InvalidArgumentException('Parameter tidak ditemukan.');
+        }
+
+        return $this->fresh($record);
+    }
+
+    /**
+     * Reorder parameters by passing the new id sequence top-to-bottom.
+     * Items not in the list keep their existing sort_order — only the
+     * supplied ids are renumbered 0..N-1.
+     *
+     * @param  array<int, int>  $orderedIds
+     */
+    public function reorderParameters(TfpAobGroundRecord $record, array $orderedIds): TfpAobGroundRecord
+    {
+        if ($record->status === 'completed') {
+            throw new RuntimeException('Form yang sudah completed tidak dapat diubah strukturnya.');
+        }
+
+        DB::transaction(function () use ($record, $orderedIds) {
+            foreach ($orderedIds as $index => $id) {
+                $record->items()->where('id', $id)->update(['sort_order' => $index]);
+            }
+        });
+
+        return $this->fresh($record);
+    }
+
+    // ─── Structural edit (facilities) ──────────────────────────
+
+    public function addFacility(TfpAobGroundRecord $record, array $data): TfpAobGroundRecord
+    {
+        if ($record->status === 'completed') {
+            throw new RuntimeException('Form yang sudah completed tidak dapat diubah strukturnya.');
+        }
+
+        $maxSort = (int) ($record->facilities()->max('sort_order') ?? -1);
+
+        TfpAobGroundFacility::create([
+            'aob_ground_record_id' => $record->id,
+            'facility_name'        => trim((string) $data['facility_name']),
+            'kondisi'              => null,
+            'keterangan'           => null,
+            'sort_order'           => $maxSort + 1,
+        ]);
+
+        return $this->fresh($record);
+    }
+
+    public function updateFacilityStructure(TfpAobGroundRecord $record, int $facilityId, array $data): TfpAobGroundRecord
+    {
+        if ($record->status === 'completed') {
+            throw new RuntimeException('Form yang sudah completed tidak dapat diubah strukturnya.');
+        }
+
+        /** @var TfpAobGroundFacility|null $facility */
+        $facility = $record->facilities()->where('id', $facilityId)->first();
+        if (!$facility) {
+            throw new InvalidArgumentException('Fasilitas tidak ditemukan.');
+        }
+
+        if (array_key_exists('facility_name', $data)) {
+            $facility->facility_name = trim((string) $data['facility_name']);
+            $facility->save();
+        }
+
+        return $this->fresh($record);
+    }
+
+    public function deleteFacility(TfpAobGroundRecord $record, int $facilityId): TfpAobGroundRecord
+    {
+        if ($record->status === 'completed') {
+            throw new RuntimeException('Form yang sudah completed tidak dapat diubah strukturnya.');
+        }
+
+        $deleted = $record->facilities()->where('id', $facilityId)->delete();
+        if ($deleted === 0) {
+            throw new InvalidArgumentException('Fasilitas tidak ditemukan.');
+        }
+
+        return $this->fresh($record);
+    }
+
+    /**
+     * @param  array<int, int>  $orderedIds
+     */
+    public function reorderFacilities(TfpAobGroundRecord $record, array $orderedIds): TfpAobGroundRecord
+    {
+        if ($record->status === 'completed') {
+            throw new RuntimeException('Form yang sudah completed tidak dapat diubah strukturnya.');
+        }
+
+        DB::transaction(function () use ($record, $orderedIds) {
+            foreach ($orderedIds as $index => $id) {
+                $record->facilities()->where('id', $id)->update(['sort_order' => $index]);
+            }
+        });
+
+        return $this->fresh($record);
+    }
+
+    private function fresh(TfpAobGroundRecord $record): TfpAobGroundRecord
+    {
+        return $record->fresh([
+            'technicians',
+            'items',
+            'facilities',
+            'manager:id,name',
+            'supervisor:id,name',
+        ]);
+    }
+
     // ─── Sign ──────────────────────────────────────────────────
 
     /**

@@ -167,6 +167,233 @@ class TfpAobGroundController extends Controller
         ], 'Signature saved successfully');
     }
 
+    // ─── Structural edit (Manager / Supervisor / Admin only) ──────────────
+
+    /**
+     * POST /api/v1/tfp/aob-ground/{id}/parameters
+     */
+    public function addParameter(Request $request, int $id): JsonResponse
+    {
+        $record = TfpAobGroundRecord::find($id);
+        if (!$record) {
+            return $this->error('Form tidak ditemukan.', null, 404);
+        }
+        if (!$this->canEditStructure()) {
+            return $this->error('Hanya Manager Teknik atau Supervisor TFP yang dapat menambah parameter.', null, 403);
+        }
+
+        $payload = $request->validate([
+            'parameter_number' => ['nullable', 'string', 'max:10'],
+            'parameter_name'   => ['required', 'string', 'max:200'],
+            'unit'             => ['nullable', 'string', 'max:30'],
+        ]);
+
+        try {
+            $record = $this->service->addParameter($record, $payload);
+        } catch (RuntimeException $e) {
+            return $this->error($e->getMessage(), null, 409);
+        }
+
+        return $this->success($this->detailRecord($record), 'Parameter ditambahkan.');
+    }
+
+    /**
+     * PUT /api/v1/tfp/aob-ground/{id}/parameters/{paramId}
+     */
+    public function updateParameter(Request $request, int $id, int $paramId): JsonResponse
+    {
+        $record = TfpAobGroundRecord::find($id);
+        if (!$record) {
+            return $this->error('Form tidak ditemukan.', null, 404);
+        }
+        if (!$this->canEditStructure()) {
+            return $this->error('Hanya Manager Teknik atau Supervisor TFP yang dapat mengubah struktur parameter.', null, 403);
+        }
+
+        $payload = $request->validate([
+            'parameter_number' => ['sometimes', 'nullable', 'string', 'max:10'],
+            'parameter_name'   => ['sometimes', 'string', 'max:200'],
+            'unit'             => ['sometimes', 'nullable', 'string', 'max:30'],
+        ]);
+
+        try {
+            $record = $this->service->updateParameterStructure($record, $paramId, $payload);
+        } catch (InvalidArgumentException $e) {
+            return $this->error($e->getMessage(), null, 404);
+        } catch (RuntimeException $e) {
+            return $this->error($e->getMessage(), null, 409);
+        }
+
+        return $this->success($this->detailRecord($record), 'Parameter diperbarui.');
+    }
+
+    /**
+     * DELETE /api/v1/tfp/aob-ground/{id}/parameters/{paramId}
+     */
+    public function deleteParameter(int $id, int $paramId): JsonResponse
+    {
+        $record = TfpAobGroundRecord::find($id);
+        if (!$record) {
+            return $this->error('Form tidak ditemukan.', null, 404);
+        }
+        if (!$this->canEditStructure()) {
+            return $this->error('Hanya Manager Teknik atau Supervisor TFP yang dapat menghapus parameter.', null, 403);
+        }
+
+        try {
+            $record = $this->service->deleteParameter($record, $paramId);
+        } catch (InvalidArgumentException $e) {
+            return $this->error($e->getMessage(), null, 404);
+        } catch (RuntimeException $e) {
+            return $this->error($e->getMessage(), null, 409);
+        }
+
+        return $this->success($this->detailRecord($record), 'Parameter dihapus.');
+    }
+
+    /**
+     * PUT /api/v1/tfp/aob-ground/{id}/parameters-reorder
+     */
+    public function reorderParameters(Request $request, int $id): JsonResponse
+    {
+        $record = TfpAobGroundRecord::find($id);
+        if (!$record) {
+            return $this->error('Form tidak ditemukan.', null, 404);
+        }
+        if (!$this->canEditStructure()) {
+            return $this->error('Hanya Manager Teknik atau Supervisor TFP yang dapat mengubah urutan.', null, 403);
+        }
+
+        $payload = $request->validate([
+            'ordered_ids'   => ['required', 'array'],
+            'ordered_ids.*' => ['integer'],
+        ]);
+
+        try {
+            $record = $this->service->reorderParameters($record, $payload['ordered_ids']);
+        } catch (RuntimeException $e) {
+            return $this->error($e->getMessage(), null, 409);
+        }
+
+        return $this->success($this->detailRecord($record), 'Urutan parameter diperbarui.');
+    }
+
+    /**
+     * POST /api/v1/tfp/aob-ground/{id}/facilities
+     */
+    public function addFacility(Request $request, int $id): JsonResponse
+    {
+        $record = TfpAobGroundRecord::find($id);
+        if (!$record) {
+            return $this->error('Form tidak ditemukan.', null, 404);
+        }
+        if (!$this->canEditStructure()) {
+            return $this->error('Hanya Manager Teknik atau Supervisor TFP yang dapat menambah fasilitas.', null, 403);
+        }
+
+        $payload = $request->validate([
+            'facility_name' => ['required', 'string', 'max:100'],
+        ]);
+
+        try {
+            $record = $this->service->addFacility($record, $payload);
+        } catch (RuntimeException $e) {
+            return $this->error($e->getMessage(), null, 409);
+        }
+
+        return $this->success($this->detailRecord($record), 'Fasilitas ditambahkan.');
+    }
+
+    /**
+     * PUT /api/v1/tfp/aob-ground/{id}/facilities/{facilityId}
+     */
+    public function updateFacility(Request $request, int $id, int $facilityId): JsonResponse
+    {
+        $record = TfpAobGroundRecord::find($id);
+        if (!$record) {
+            return $this->error('Form tidak ditemukan.', null, 404);
+        }
+        if (!$this->canEditStructure()) {
+            return $this->error('Hanya Manager Teknik atau Supervisor TFP yang dapat mengubah struktur fasilitas.', null, 403);
+        }
+
+        $payload = $request->validate([
+            'facility_name' => ['sometimes', 'string', 'max:100'],
+        ]);
+
+        try {
+            $record = $this->service->updateFacilityStructure($record, $facilityId, $payload);
+        } catch (InvalidArgumentException $e) {
+            return $this->error($e->getMessage(), null, 404);
+        } catch (RuntimeException $e) {
+            return $this->error($e->getMessage(), null, 409);
+        }
+
+        return $this->success($this->detailRecord($record), 'Fasilitas diperbarui.');
+    }
+
+    /**
+     * DELETE /api/v1/tfp/aob-ground/{id}/facilities/{facilityId}
+     */
+    public function deleteFacility(int $id, int $facilityId): JsonResponse
+    {
+        $record = TfpAobGroundRecord::find($id);
+        if (!$record) {
+            return $this->error('Form tidak ditemukan.', null, 404);
+        }
+        if (!$this->canEditStructure()) {
+            return $this->error('Hanya Manager Teknik atau Supervisor TFP yang dapat menghapus fasilitas.', null, 403);
+        }
+
+        try {
+            $record = $this->service->deleteFacility($record, $facilityId);
+        } catch (InvalidArgumentException $e) {
+            return $this->error($e->getMessage(), null, 404);
+        } catch (RuntimeException $e) {
+            return $this->error($e->getMessage(), null, 409);
+        }
+
+        return $this->success($this->detailRecord($record), 'Fasilitas dihapus.');
+    }
+
+    /**
+     * PUT /api/v1/tfp/aob-ground/{id}/facilities-reorder
+     */
+    public function reorderFacilities(Request $request, int $id): JsonResponse
+    {
+        $record = TfpAobGroundRecord::find($id);
+        if (!$record) {
+            return $this->error('Form tidak ditemukan.', null, 404);
+        }
+        if (!$this->canEditStructure()) {
+            return $this->error('Hanya Manager Teknik atau Supervisor TFP yang dapat mengubah urutan.', null, 403);
+        }
+
+        $payload = $request->validate([
+            'ordered_ids'   => ['required', 'array'],
+            'ordered_ids.*' => ['integer'],
+        ]);
+
+        try {
+            $record = $this->service->reorderFacilities($record, $payload['ordered_ids']);
+        } catch (RuntimeException $e) {
+            return $this->error($e->getMessage(), null, 409);
+        }
+
+        return $this->success($this->detailRecord($record), 'Urutan fasilitas diperbarui.');
+    }
+
+    /**
+     * Role guard for structural edits. Manager Teknik / Supervisor TFP / Admin
+     * only — Teknisi can fill values but not rename/add/delete/reorder rows.
+     * Mirrors the role guard pattern used in CnsdReadinessController.
+     */
+    private function canEditStructure(): bool
+    {
+        $user = Auth::user();
+        return $user && ($user->isAdmin() || $user->isManager() || $user->isSupervisor());
+    }
+
     /**
      * DELETE /api/v1/tfp/aob-ground/{id}
      */
