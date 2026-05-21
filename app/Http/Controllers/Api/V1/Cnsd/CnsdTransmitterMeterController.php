@@ -9,6 +9,7 @@ use App\Http\Requests\Cnsd\CreateCnsdTransmitterMeterRequest;
 use App\Http\Requests\Cnsd\SignCnsdTransmitterMeterRequest;
 use App\Http\Requests\Cnsd\UpdateCnsdTransmitterMeterRequest;
 use App\Models\Cnsd\CnsdTransmitterMeterRecord;
+use App\Services\Cnsd\CnsdActivityLogger;
 use App\Services\Cnsd\CnsdTransmitterMeterService;
 use App\Services\Cnsd\CnsdTransmitterMeterTemplate;
 use App\Traits\ApiResponse;
@@ -24,6 +25,7 @@ class CnsdTransmitterMeterController extends Controller
 
     public function __construct(
         protected CnsdTransmitterMeterService $service,
+        protected CnsdActivityLogger $activityLogger,
     ) {}
 
     /**
@@ -81,6 +83,10 @@ class CnsdTransmitterMeterController extends Controller
         } catch (RuntimeException $e) {
             return $this->error($e->getMessage(), null, 422);
         }
+
+        try {
+            $this->activityLogger->logMeterReadingCreated($record, 'TRANSMITTER', '/cnsd/transmitter-meter', $user);
+        } catch (\Throwable) { /* non-fatal */ }
 
         return $this->success($this->detailRecord($record), 'CNSD Transmitter Meter record created successfully', 201);
     }

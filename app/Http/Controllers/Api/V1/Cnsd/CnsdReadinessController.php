@@ -9,6 +9,7 @@ use App\Http\Requests\Cnsd\CreateCnsdReadinessRequest;
 use App\Http\Requests\Cnsd\SignCnsdReadinessRequest;
 use App\Http\Requests\Cnsd\UpdateCnsdReadinessRequest;
 use App\Models\Cnsd\CnsdReadinessRecord;
+use App\Services\Cnsd\CnsdActivityLogger;
 use App\Services\Cnsd\CnsdEq1Template;
 use App\Services\Cnsd\CnsdReadinessService;
 use App\Services\NotificationService;
@@ -26,6 +27,7 @@ class CnsdReadinessController extends Controller
     public function __construct(
         protected CnsdReadinessService $service,
         protected NotificationService $notificationService,
+        protected CnsdActivityLogger $activityLogger,
     ) {}
 
     /**
@@ -94,6 +96,18 @@ class CnsdReadinessController extends Controller
             // Notification failure is non-fatal; log would surface in storage/logs
         }
 
+        // Auto-append an entry to the daily CNSD logbook (auto-creates the
+        // logbook if missing). Notification already fired above, so this only
+        // writes the logbook side.
+        try {
+            $this->activityLogger->appendLogbookNote(
+                'Kesiapan Peralatan CNSD (EQ-1)',
+                $record->date->format('Y-m-d'),
+                $record->shift_type,
+                $user,
+            );
+        } catch (\Throwable) { /* non-fatal */ }
+
         return $this->success($this->detailRecord($record), 'CNSD readiness record created successfully', 201);
     }
 
@@ -132,6 +146,151 @@ class CnsdReadinessController extends Controller
         }
 
         return $this->success($this->detailRecord($record), 'CNSD readiness record updated successfully');
+    }
+
+    /**
+     * POST /api/v1/cnsd/readiness/{id}/items — add a new item row.
+     * Manager Teknik / Supervisor / Admin only.
+     */
+    public function addItem(Request $request, int $id): JsonResponse
+    {
+        $record = CnsdReadinessRecord::find($id);
+        if (!$record) {
+            return $this->error('Form tidak ditemukan.', null, 404);
+        }
+
+        $user = Auth::user();
+        if (!$user || (!$user->isAdmin() && !$user->isManager() && !$user->isSupervisor())) {
+            return $this->error('Hanya Manager Teknik atau Supervisor CNSD yang dapat menambah baris.', null, 403);
+        }
+
+        $payload = $request->validate([
+            'section_name'          => ['required', 'string', 'max:60'],
+            'item_number'           => ['nullable', 'string', 'max:10'],
+            'equipment_name'        => ['required', 'string', 'max:255'],
+            'sub_equipment_name'    => ['nullable', 'string', 'max:60'],
+            'status_peralatan'      => ['nullable', 'string', 'max:60'],
+            'kondisi_operasional_1' => ['nullable', 'string', 'max:80'],
+            'kondisi_operasional_2' => ['nullable', 'string', 'max:80'],
+            'keterangan'            => ['nullable', 'string', 'max:255'],
+        ]);
+
+        try {
+            $this->service->addItem($record, $payload['section_name'], $payload);
+        } catch (InvalidArgumentException $e) {
+            return $this->error($e->getMessage(), null, 422);
+        } catch (RuntimeException $e) {
+            return $this->error($e->getMessage(), null, 409);
+        }
+
+        return $this->success(
+            $this->detailRecord($record->fresh(['technicians', 'items', 'manager:id,name', 'supervisor:id,name'])),
+            'Baris berhasil ditambahkan.',
+        );
+    }
+
+    /**
+     * PUT /api/v1/cnsd/readiness/{id}/items/{itemId} — update structural fields
+     * (equipment_name, item_number, sub_equipment_name). Manager / Supervisor / Admin only.
+     */
+    public function updateItem(Request $request, int $id, int $itemId): JsonResponse
+    {
+        $record = CnsdReadinessRecord::find($id);
+        if (!$record) {
+            return $this->error('Form tidak ditemukan.', null, 404);
+        }
+
+        $user = Auth::user();
+        if (!$user || (!$user->isAdmin() && !$user->isManager() && !$user->isSupervisor())) {
+            return $this->error('Hanya Manager Teknik atau Supervisor CNSD yang dapat mengedit struktur baris.', null, 403);
+        }
+
+        $payload = $request->validate([
+            'item_number'        => ['nullable', 'string', 'max:10'],
+            'equipment_name'     => ['nullable', 'string', 'max:255'],
+            'sub_equipment_name' => ['nullable', 'string', 'max:60'],
+        ]);
+
+        try {
+            $this->service->updateItemStructure($record, $itemId, $payload);
+        } catch (InvalidArgumentException $e) {
+            return $this->error($e->getMessage(), null, 404);
+        } catch (RuntimeException $e) {
+            return $this->error($e->getMessage(), null, 409);
+        }
+
+        return $this->success(
+            $this->detailRecord($record->fresh(['technicians', 'items', 'manager:id,name', 'supervisor:id,name'])),
+            'Baris diperbarui.',
+        );
+    }
+
+    /**
+     * DELETE /api/v1/cnsd/readiness/{id}/items/{itemId} — Manager / Supervisor / Admin only.
+     */
+    public function deleteItem(int $id, int $itemId): JsonResponse
+    {
+        $record = CnsdReadinessRecord::find($id);
+        if (!$record) {
+            return $this->error('Form tidak ditemukan.', null, 404);
+        }
+
+        $user = Auth::user();
+        if (!$user || (!$user->isAdmin() && !$user->isManager() && !$user->isSupervisor())) {
+            return $this->error('Hanya Manager Teknik atau Supervisor CNSD yang dapat menghapus baris.', null, 403);
+        }
+
+        try {
+            $this->service->deleteItem($record, $itemId);
+        } catch (RuntimeException $e) {
+            return $this->error($e->getMessage(), null, 409);
+        }
+
+        return $this->success(
+            $this->detailRecord($record->fresh(['technicians', 'items', 'manager:id,name', 'supervisor:id,name'])),
+            'Baris dihapus.',
+        );
+    }
+
+    /**
+     * PUT /api/v1/cnsd/readiness/{id}/sections — rename a section heading +
+     * (optionally) edit its column labels. Manager / Supervisor / Admin only.
+     *
+     * Payload:
+     *   { "old_name": "...", "name": "...",
+     *     "columns_label_1": "...", "columns_label_2": "..." }
+     */
+    public function renameSection(Request $request, int $id): JsonResponse
+    {
+        $record = CnsdReadinessRecord::find($id);
+        if (!$record) {
+            return $this->error('Form tidak ditemukan.', null, 404);
+        }
+
+        $user = Auth::user();
+        if (!$user || (!$user->isAdmin() && !$user->isManager() && !$user->isSupervisor())) {
+            return $this->error('Hanya Manager Teknik atau Supervisor CNSD yang dapat mengganti nama section.', null, 403);
+        }
+
+        $payload = $request->validate([
+            'old_name'        => ['required', 'string', 'max:60'],
+            'name'            => ['required', 'string', 'max:60'],
+            'columns_label_1' => ['nullable', 'string', 'max:80'],
+            'columns_label_2' => ['nullable', 'string', 'max:80'],
+        ]);
+
+        try {
+            $this->service->renameSection($record, $payload['old_name'], $payload);
+        } catch (InvalidArgumentException $e) {
+            return $this->error($e->getMessage(), null, 422);
+        } catch (RuntimeException $e) {
+            return $this->error($e->getMessage(), null, 409);
+        }
+
+        return $this->success(
+            $this->detailRecord($record->fresh(['technicians', 'items', 'manager:id,name', 'supervisor:id,name'])),
+            'Section diperbarui.',
+        );
     }
 
     /**
@@ -301,7 +460,13 @@ class CnsdReadinessController extends Controller
                 'keterangan'             => $it->keterangan,
                 'sort_order'             => $it->sort_order,
             ])->values()->toArray(),
-            'sections_meta'  => CnsdEq1Template::sectionMeta(),
+            // Per-record sections_meta (editable by Manager/Supervisor). Falls
+            // back to the EQ-1 template default for legacy records that have
+            // not been backfilled yet (defense-in-depth — the migration does
+            // backfill, but this guards against any new form types).
+            'sections_meta'  => is_array($r->sections_meta) && !empty($r->sections_meta)
+                ? $r->sections_meta
+                : CnsdEq1Template::sectionMeta(),
             'created_by'     => $r->created_by_id ? ['id' => $r->created_by_id, 'name' => $r->created_by_name] : null,
             'created_at'     => $r->created_at?->toISOString(),
             'updated_at'     => $r->updated_at?->toISOString(),

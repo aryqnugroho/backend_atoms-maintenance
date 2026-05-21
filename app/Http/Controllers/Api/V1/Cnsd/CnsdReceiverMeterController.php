@@ -9,6 +9,7 @@ use App\Http\Requests\Cnsd\CreateCnsdReceiverMeterRequest;
 use App\Http\Requests\Cnsd\SignCnsdReceiverMeterRequest;
 use App\Http\Requests\Cnsd\UpdateCnsdReceiverMeterRequest;
 use App\Models\Cnsd\CnsdReceiverMeterRecord;
+use App\Services\Cnsd\CnsdActivityLogger;
 use App\Services\Cnsd\CnsdReceiverMeterService;
 use App\Services\Cnsd\CnsdReceiverMeterTemplate;
 use App\Traits\ApiResponse;
@@ -24,6 +25,7 @@ class CnsdReceiverMeterController extends Controller
 
     public function __construct(
         protected CnsdReceiverMeterService $service,
+        protected CnsdActivityLogger $activityLogger,
     ) {}
 
     /**
@@ -101,6 +103,10 @@ class CnsdReceiverMeterController extends Controller
             return $this->error($e->getMessage(), null, 422);
         }
 
+        try {
+            $this->activityLogger->logMeterReadingCreated($record, 'RECEIVER', '/cnsd/receiver-meter', $user);
+        } catch (\Throwable) { /* non-fatal */ }
+
         return $this->success($this->detailRecord($record), 'CNSD Receiver Meter record created successfully', 201);
     }
 
@@ -133,7 +139,7 @@ class CnsdReceiverMeterController extends Controller
         }
 
         try {
-            $record = $this->service->updateItems($record, $request->validated()['items']);
+            $record = $this->service->updateRecord($record, $request->validated());
         } catch (RuntimeException $e) {
             return $this->error($e->getMessage(), null, 409);
         }

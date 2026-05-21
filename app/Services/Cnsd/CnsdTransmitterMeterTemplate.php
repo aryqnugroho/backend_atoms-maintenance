@@ -48,10 +48,12 @@ class CnsdTransmitterMeterTemplate
                         'name'   => 'LINGKUNGAN KERJA',
                         'items'  => [
                             ['item_number' => '1', 'kegiatan' => 'Pemeriksaan suhu Ruangan',       'nominal' => '<22°C'],
-                            ['item_number' => '2', 'kegiatan' => 'Pemeriksaan Air Humidity',       'nominal' => '√'],
-                            ['item_number' => '3', 'kegiatan' => 'Pemeriksaan Kebersihan Ruangan', 'nominal' => '√'],
-                            ['item_number' => '4', 'kegiatan' => 'Pemeriksaan UPS',                'nominal' => '√'],
+                            ['item_number' => '2', 'kegiatan' => 'Pemeriksaan Air Humidity',       'nominal' => '✓'],
+                            ['item_number' => '3', 'kegiatan' => 'Pemeriksaan Kebersihan Ruangan', 'nominal' => '✓'],
+                            ['item_number' => '4', 'kegiatan' => 'Pemeriksaan UPS',                'nominal' => '✓'],
                         ],
+                        // NOTE: env kegiatan text is stored in `frequency_label` column
+                        // since the items schema has no dedicated item_name field.
                     ],
                 ],
             ],
@@ -238,14 +240,14 @@ class CnsdTransmitterMeterTemplate
                             'updated_at'      => $now,
                         ];
                     } else {
-                        // Environment item
+                        // Environment item (kegiatan text goes into frequency_label column)
                         $rows[] = [
                             'transmitter_meter_record_id' => $recordId,
                             'section_code'    => $section['code'],
                             'section_name'    => $section['name'],
                             'group_number'    => $group['number'],
                             'group_name'      => $group['name'],
-                            'frequency_label' => null,
+                            'frequency_label' => $item['kegiatan'] ?? null,
                             'merk'            => null,
                             'tx_label'        => null,
                             'status_value'    => null,

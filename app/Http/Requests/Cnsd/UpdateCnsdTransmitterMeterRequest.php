@@ -14,8 +14,8 @@ class UpdateCnsdTransmitterMeterRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'items'                => ['required', 'array', 'min:1'],
-            'items.*.id'           => ['required', 'integer'],
+            'items'                => ['sometimes', 'array'],
+            'items.*.id'           => ['required_with:items', 'integer'],
             'items.*.status_value' => ['sometimes', 'nullable', 'string', 'max:30'],
             'items.*.power_output' => ['sometimes', 'nullable', 'string', 'max:60'],
             'items.*.modulasi'     => ['sometimes', 'nullable', 'string', 'max:60'],

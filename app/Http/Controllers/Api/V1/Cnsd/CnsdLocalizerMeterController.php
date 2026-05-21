@@ -9,6 +9,7 @@ use App\Http\Requests\Cnsd\CreateCnsdLocalizerMeterRequest;
 use App\Http\Requests\Cnsd\SignCnsdLocalizerMeterRequest;
 use App\Http\Requests\Cnsd\UpdateCnsdLocalizerMeterRequest;
 use App\Models\Cnsd\CnsdLocalizerMeterRecord;
+use App\Services\Cnsd\CnsdActivityLogger;
 use App\Services\Cnsd\CnsdLocalizerMeterService;
 use App\Services\Cnsd\CnsdLocalizerMeterTemplate;
 use App\Traits\ApiResponse;
@@ -22,7 +23,10 @@ class CnsdLocalizerMeterController extends Controller
 {
     use ApiResponse;
 
-    public function __construct(protected CnsdLocalizerMeterService $service) {}
+    public function __construct(
+        protected CnsdLocalizerMeterService $service,
+        protected CnsdActivityLogger $activityLogger,
+    ) {}
 
     /** GET /api/v1/cnsd/localizer-meter */
     public function index(Request $request): JsonResponse
@@ -69,6 +73,11 @@ class CnsdLocalizerMeterController extends Controller
         } catch (RuntimeException $e) {
             return $this->error($e->getMessage(), null, 422);
         }
+
+        try {
+            $this->activityLogger->logMeterReadingCreated($record, 'LOCALIZER', '/cnsd/localizer-meter', $user);
+        } catch (\Throwable) { /* non-fatal */ }
+
         return $this->success($this->detail($record), 'CNSD Localizer Meter record created successfully', 201);
     }
 
@@ -90,7 +99,7 @@ class CnsdLocalizerMeterController extends Controller
             return $this->error('Unauthorized.', null, 403);
         }
         try {
-            $record = $this->service->updateItems($record, $request->validated()['items']);
+            $record = $this->service->updateRecord($record, $request->validated());
         } catch (RuntimeException $e) {
             return $this->error($e->getMessage(), null, 409);
         }

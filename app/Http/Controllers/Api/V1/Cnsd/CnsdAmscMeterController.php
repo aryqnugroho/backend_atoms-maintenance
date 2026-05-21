@@ -9,6 +9,7 @@ use App\Http\Requests\Cnsd\CreateCnsdAmscMeterRequest;
 use App\Http\Requests\Cnsd\SignCnsdAmscMeterRequest;
 use App\Http\Requests\Cnsd\UpdateCnsdAmscMeterRequest;
 use App\Models\Cnsd\CnsdAmscMeterRecord;
+use App\Services\Cnsd\CnsdActivityLogger;
 use App\Services\Cnsd\CnsdAmscMeterService;
 use App\Services\Cnsd\CnsdAmscMeterTemplate;
 use App\Traits\ApiResponse;
@@ -24,6 +25,7 @@ class CnsdAmscMeterController extends Controller
 
     public function __construct(
         protected CnsdAmscMeterService $service,
+        protected CnsdActivityLogger $activityLogger,
     ) {}
 
     /**
@@ -84,6 +86,10 @@ class CnsdAmscMeterController extends Controller
             return $this->error($e->getMessage(), null, 422);
         }
 
+        try {
+            $this->activityLogger->logMeterReadingCreated($record, 'AMSC', '/cnsd/amsc-meter', $user);
+        } catch (\Throwable) { /* non-fatal */ }
+
         return $this->success($this->detailRecord($record), 'CNSD AMSC Meter record created successfully', 201);
     }
 
@@ -116,7 +122,7 @@ class CnsdAmscMeterController extends Controller
         }
 
         try {
-            $record = $this->service->updateItems($record, $request->validated()['items']);
+            $record = $this->service->updateRecord($record, $request->validated());
         } catch (RuntimeException $e) {
             return $this->error($e->getMessage(), null, 409);
         }

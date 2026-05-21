@@ -16,7 +16,8 @@ class CnsdAmscMeterDuplicateException extends RuntimeException
             'Form AMSC Meter Reading untuk tanggal '
             . $existing->date->format('Y-m-d')
             . ' shift ' . $existing->shift_type
-            . ' sudah ada (No. ' . $existing->form_number . ').'
+            . ' sudah ada (Form #' . $existing->form_number . '). '
+            . 'Hapus form yang ada terlebih dahulu jika ingin membuat ulang untuk shift yang sama.'
         );
     }
 }

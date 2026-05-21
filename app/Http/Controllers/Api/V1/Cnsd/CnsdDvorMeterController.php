@@ -9,6 +9,7 @@ use App\Http\Requests\Cnsd\CreateCnsdDvorMeterRequest;
 use App\Http\Requests\Cnsd\SignCnsdDvorMeterRequest;
 use App\Http\Requests\Cnsd\UpdateCnsdDvorMeterRequest;
 use App\Models\Cnsd\CnsdDvorMeterRecord;
+use App\Services\Cnsd\CnsdActivityLogger;
 use App\Services\Cnsd\CnsdDvorMeterService;
 use App\Services\Cnsd\CnsdDvorMeterTemplate;
 use App\Traits\ApiResponse;
@@ -22,7 +23,10 @@ class CnsdDvorMeterController extends Controller
 {
     use ApiResponse;
 
-    public function __construct(protected CnsdDvorMeterService $service) {}
+    public function __construct(
+        protected CnsdDvorMeterService $service,
+        protected CnsdActivityLogger $activityLogger,
+    ) {}
 
     /** GET /api/v1/cnsd/dvor-meter */
     public function index(Request $request): JsonResponse
@@ -69,6 +73,11 @@ class CnsdDvorMeterController extends Controller
         } catch (RuntimeException $e) {
             return $this->error($e->getMessage(), null, 422);
         }
+
+        try {
+            $this->activityLogger->logMeterReadingCreated($record, 'DVOR', '/cnsd/dvor-meter', $user);
+        } catch (\Throwable) { /* non-fatal */ }
+
         return $this->success($this->detail($record), 'CNSD DVOR Meter record created successfully', 201);
     }
 
@@ -90,7 +99,7 @@ class CnsdDvorMeterController extends Controller
             return $this->error('Unauthorized.', null, 403);
         }
         try {
-            $record = $this->service->updateItems($record, $request->validated());
+            $record = $this->service->updateRecord($record, $request->validated());
         } catch (RuntimeException $e) {
             return $this->error($e->getMessage(), null, 409);
         }

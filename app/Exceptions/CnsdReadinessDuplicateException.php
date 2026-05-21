@@ -21,7 +21,8 @@ class CnsdReadinessDuplicateException extends RuntimeException
     ) {
         if ($message === '') {
             $message = sprintf(
-                'Form %s untuk tanggal %s shift %s sudah ada (No. %s).',
+                'Form %s untuk tanggal %s shift %s sudah ada (Form #%s). '
+                . 'Hapus form yang ada terlebih dahulu jika ingin membuat ulang untuk shift yang sama.',
                 $existingRecord->form_type,
                 $existingRecord->date?->format('Y-m-d') ?? '',
                 $existingRecord->shift_type,

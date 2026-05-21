@@ -9,6 +9,7 @@ use App\Http\Requests\Cnsd\CreateCnsdRadarMeterRequest;
 use App\Http\Requests\Cnsd\SignCnsdRadarMeterRequest;
 use App\Http\Requests\Cnsd\UpdateCnsdRadarMeterRequest;
 use App\Models\Cnsd\CnsdRadarMeterRecord;
+use App\Services\Cnsd\CnsdActivityLogger;
 use App\Services\Cnsd\CnsdRadarMeterService;
 use App\Services\Cnsd\CnsdRadarMeterTemplate;
 use App\Traits\ApiResponse;
@@ -24,6 +25,7 @@ class CnsdRadarMeterController extends Controller
 
     public function __construct(
         protected CnsdRadarMeterService $service,
+        protected CnsdActivityLogger $activityLogger,
     ) {}
 
     /**
@@ -54,7 +56,7 @@ class CnsdRadarMeterController extends Controller
             'form_type'     => 'RADAR-METER',
             'facility'      => 'RADAR',
             'merk_default'  => 'ELDIS',
-            'type_default'  => 'MSSR-1 / RL2000',
+            'type_default'  => '5SR-N-I FL2000',
             'sections'      => CnsdRadarMeterTemplate::sections(),
         ], 'Radar Meter template retrieved successfully');
     }
@@ -82,6 +84,10 @@ class CnsdRadarMeterController extends Controller
         } catch (RuntimeException $e) {
             return $this->error($e->getMessage(), null, 422);
         }
+
+        try {
+            $this->activityLogger->logMeterReadingCreated($record, 'RADAR', '/cnsd/radar-meter', $user);
+        } catch (\Throwable) { /* non-fatal */ }
 
         return $this->success($this->detailRecord($record), 'CNSD Radar Meter record created successfully', 201);
     }
@@ -115,7 +121,7 @@ class CnsdRadarMeterController extends Controller
         }
 
         try {
-            $record = $this->service->updateItems($record, $request->validated()['items']);
+            $record = $this->service->updateRecord($record, $request->validated());
         } catch (RuntimeException $e) {
             return $this->error($e->getMessage(), null, 409);
         }

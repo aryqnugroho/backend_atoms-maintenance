@@ -40,6 +40,7 @@ class CnsdReadinessRecord extends Model
         'shift_type',
         'location',
         'room',
+        'sections_meta',
         'status',
         'manager_id',
         'manager_name',
@@ -57,6 +58,7 @@ class CnsdReadinessRecord extends Model
 
     protected $casts = [
         'date'                 => 'date:Y-m-d',
+        'sections_meta'        => 'array',
         'manager_signed_at'    => 'datetime',
         'supervisor_signed_at' => 'datetime',
     ];

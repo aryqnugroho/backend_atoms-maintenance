@@ -9,6 +9,7 @@ use App\Http\Requests\Cnsd\CreateCnsdTdmeMeterRequest;
 use App\Http\Requests\Cnsd\SignCnsdTdmeMeterRequest;
 use App\Http\Requests\Cnsd\UpdateCnsdTdmeMeterRequest;
 use App\Models\Cnsd\CnsdTdmeMeterRecord;
+use App\Services\Cnsd\CnsdActivityLogger;
 use App\Services\Cnsd\CnsdTdmeMeterService;
 use App\Services\Cnsd\CnsdTdmeMeterTemplate;
 use App\Traits\ApiResponse;
@@ -22,7 +23,10 @@ class CnsdTdmeMeterController extends Controller
 {
     use ApiResponse;
 
-    public function __construct(protected CnsdTdmeMeterService $service) {}
+    public function __construct(
+        protected CnsdTdmeMeterService $service,
+        protected CnsdActivityLogger $activityLogger,
+    ) {}
 
     /** GET /api/v1/cnsd/tdme-meter */
     public function index(Request $request): JsonResponse
@@ -69,6 +73,11 @@ class CnsdTdmeMeterController extends Controller
         } catch (RuntimeException $e) {
             return $this->error($e->getMessage(), null, 422);
         }
+
+        try {
+            $this->activityLogger->logMeterReadingCreated($record, 'T-DME', '/cnsd/tdme-meter', $user);
+        } catch (\Throwable) { /* non-fatal */ }
+
         return $this->success($this->detail($record), 'CNSD T-DME Meter record created successfully', 201);
     }
 
@@ -90,7 +99,7 @@ class CnsdTdmeMeterController extends Controller
             return $this->error('Unauthorized.', null, 403);
         }
         try {
-            $record = $this->service->updateItems($record, $request->validated()['items']);
+            $record = $this->service->updateRecord($record, $request->validated());
         } catch (RuntimeException $e) {
             return $this->error($e->getMessage(), null, 409);
         }

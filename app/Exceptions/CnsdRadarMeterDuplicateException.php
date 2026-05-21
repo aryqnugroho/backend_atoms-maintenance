@@ -21,8 +21,8 @@ class CnsdRadarMeterDuplicateException extends RuntimeException
     ) {
         if ($message === '') {
             $message = sprintf(
-                'Form %s untuk tanggal %s shift %s sudah ada (No. %s).',
-                $existingRecord->form_type,
+                'Form Radar Meter Reading untuk tanggal %s shift %s sudah ada (Form #%s). '
+                . 'Hapus form yang ada terlebih dahulu jika ingin membuat ulang untuk shift yang sama.',
                 $existingRecord->date?->format('Y-m-d') ?? '',
                 $existingRecord->shift_type,
                 $existingRecord->form_number,

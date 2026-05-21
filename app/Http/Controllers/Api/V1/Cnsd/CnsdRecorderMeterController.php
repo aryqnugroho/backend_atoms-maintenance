@@ -9,6 +9,7 @@ use App\Http\Requests\Cnsd\CreateCnsdRecorderMeterRequest;
 use App\Http\Requests\Cnsd\SignCnsdRecorderMeterRequest;
 use App\Http\Requests\Cnsd\UpdateCnsdRecorderMeterRequest;
 use App\Models\Cnsd\CnsdRecorderMeterRecord;
+use App\Services\Cnsd\CnsdActivityLogger;
 use App\Services\Cnsd\CnsdRecorderMeterService;
 use App\Services\Cnsd\CnsdRecorderMeterTemplate;
 use App\Traits\ApiResponse;
@@ -24,6 +25,7 @@ class CnsdRecorderMeterController extends Controller
 
     public function __construct(
         protected CnsdRecorderMeterService $service,
+        protected CnsdActivityLogger $activityLogger,
     ) {}
 
     /**
@@ -85,6 +87,10 @@ class CnsdRecorderMeterController extends Controller
             return $this->error($e->getMessage(), null, 422);
         }
 
+        try {
+            $this->activityLogger->logMeterReadingCreated($record, 'RECORDER', '/cnsd/recorder-meter', $user);
+        } catch (\Throwable) { /* non-fatal */ }
+
         return $this->success($this->detailRecord($record), 'CNSD Recorder Meter record created successfully', 201);
     }
 
@@ -117,7 +123,7 @@ class CnsdRecorderMeterController extends Controller
         }
 
         try {
-            $record = $this->service->updateItems($record, $request->validated()['items']);
+            $record = $this->service->updateRecord($record, $request->validated());
         } catch (RuntimeException $e) {
             return $this->error($e->getMessage(), null, 409);
         }

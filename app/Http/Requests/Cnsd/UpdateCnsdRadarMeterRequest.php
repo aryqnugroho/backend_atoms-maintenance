@@ -5,9 +5,12 @@ namespace App\Http\Requests\Cnsd;
 use Illuminate\Foundation\Http\FormRequest;
 
 /**
- * Updating a CNSD Radar Meter record only allows mutating item values
- * (kondisi_teknis_tx1/tx2, hasil, keterangan). Personnel, date, shift,
- * signatures, form_number, merk/type/serial_number are never editable here.
+ * Updating a CNSD Radar Meter record allows mutating:
+ *   - Equipment metadata (merk / type / serial_number) — pre-filled from paper
+ *     defaults but editable so Manager/Supervisor can correct identification.
+ *   - Item values (kondisi_teknis_tx1/tx2, hasil, keterangan).
+ *
+ * Personnel, date, shift, signatures, and form_number remain immutable here.
  */
 class UpdateCnsdRadarMeterRequest extends FormRequest
 {
@@ -19,6 +22,11 @@ class UpdateCnsdRadarMeterRequest extends FormRequest
     public function rules(): array
     {
         return [
+            // Equipment metadata (paper-form header: Merk / Type / SN)
+            'merk'                           => ['nullable', 'string', 'max:60'],
+            'type'                           => ['nullable', 'string', 'max:60'],
+            'serial_number'                  => ['nullable', 'string', 'max:60'],
+
             'items'                          => ['required', 'array', 'min:1'],
             'items.*.id'                     => ['required', 'integer'],
             'items.*.kondisi_teknis_tx1'     => ['nullable', 'string', 'max:120'],

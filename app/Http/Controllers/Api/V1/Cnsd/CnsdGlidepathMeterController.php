@@ -9,6 +9,7 @@ use App\Http\Requests\Cnsd\CreateCnsdGlidepathMeterRequest;
 use App\Http\Requests\Cnsd\SignCnsdGlidepathMeterRequest;
 use App\Http\Requests\Cnsd\UpdateCnsdGlidepathMeterRequest;
 use App\Models\Cnsd\CnsdGlidepathMeterRecord;
+use App\Services\Cnsd\CnsdActivityLogger;
 use App\Services\Cnsd\CnsdGlidepathMeterService;
 use App\Services\Cnsd\CnsdGlidepathMeterTemplate;
 use App\Traits\ApiResponse;
@@ -22,7 +23,10 @@ class CnsdGlidepathMeterController extends Controller
 {
     use ApiResponse;
 
-    public function __construct(protected CnsdGlidepathMeterService $service) {}
+    public function __construct(
+        protected CnsdGlidepathMeterService $service,
+        protected CnsdActivityLogger $activityLogger,
+    ) {}
 
     /** GET /api/v1/cnsd/glidepath-meter */
     public function index(Request $request): JsonResponse
@@ -69,6 +73,11 @@ class CnsdGlidepathMeterController extends Controller
         } catch (RuntimeException $e) {
             return $this->error($e->getMessage(), null, 422);
         }
+
+        try {
+            $this->activityLogger->logMeterReadingCreated($record, 'GLIDE PATH', '/cnsd/glidepath-meter', $user);
+        } catch (\Throwable) { /* non-fatal */ }
+
         return $this->success($this->detail($record), 'CNSD Glide Path Meter record created successfully', 201);
     }
 
@@ -90,7 +99,7 @@ class CnsdGlidepathMeterController extends Controller
             return $this->error('Unauthorized.', null, 403);
         }
         try {
-            $record = $this->service->updateItems($record, $request->validated()['items']);
+            $record = $this->service->updateRecord($record, $request->validated());
         } catch (RuntimeException $e) {
             return $this->error($e->getMessage(), null, 409);
         }
