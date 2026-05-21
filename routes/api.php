@@ -502,6 +502,17 @@ Route::prefix('v1')->group(function () {
             Route::delete('/{id}', [TfpGlidepathController::class, 'destroy'])
                 ->whereNumber('id')
                 ->middleware('role:Admin,Manager Teknik');
+
+            // Structural edit (Edit Mode) — controller enforces role guard
+            Route::put('/{id}/structure',                  [TfpGlidepathController::class, 'saveStructure'])->whereNumber('id');
+            Route::post('/{id}/parameters',                [TfpGlidepathController::class, 'addParameter'])->whereNumber('id');
+            Route::put('/{id}/parameters/{paramId}',       [TfpGlidepathController::class, 'updateParameter'])->whereNumber(['id', 'paramId']);
+            Route::delete('/{id}/parameters/{paramId}',    [TfpGlidepathController::class, 'deleteParameter'])->whereNumber(['id', 'paramId']);
+            Route::put('/{id}/parameters-reorder',         [TfpGlidepathController::class, 'reorderParameters'])->whereNumber('id');
+            Route::post('/{id}/facilities',                [TfpGlidepathController::class, 'addFacility'])->whereNumber('id');
+            Route::put('/{id}/facilities/{facilityId}',    [TfpGlidepathController::class, 'updateFacility'])->whereNumber(['id', 'facilityId']);
+            Route::delete('/{id}/facilities/{facilityId}', [TfpGlidepathController::class, 'deleteFacility'])->whereNumber(['id', 'facilityId']);
+            Route::put('/{id}/facilities-reorder',         [TfpGlidepathController::class, 'reorderFacilities'])->whereNumber('id');
         });
 
         // ─── Grounding Report ───────────────────────────────────────
