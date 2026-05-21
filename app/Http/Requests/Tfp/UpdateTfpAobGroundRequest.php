@@ -20,19 +20,13 @@ class UpdateTfpAobGroundRequest extends FormRequest
     {
         return [
             // Optional explicit time override (HH:MM). Falls back to now() on the server when omitted.
-            'time_filled'                    => ['nullable', 'string', 'regex:/^([01]\d|2[0-3]):[0-5]\d$/'],
+            'time_filled'    => ['nullable', 'string', 'regex:/^([01]\d|2[0-3]):[0-5]\d$/'],
 
-            // Items (measurement parameters)
-            'items'                          => ['required', 'array', 'min:1'],
-            'items.*.id'                     => ['required', 'integer'],
-            'items.*.panel_cos_a03_input'    => ['nullable', 'string', 'max:100'],
-            'items.*.panel_cos_a03_output'   => ['nullable', 'string', 'max:100'],
-            'items.*.panel_ats_a12_input'    => ['nullable', 'string', 'max:100'],
-            'items.*.panel_ats_a12_output'   => ['nullable', 'string', 'max:100'],
-            'items.*.ups_tescom_a_input'     => ['nullable', 'string', 'max:100'],
-            'items.*.ups_tescom_a_output'    => ['nullable', 'string', 'max:100'],
-            'items.*.ups_tescom_b_input'     => ['nullable', 'string', 'max:100'],
-            'items.*.ups_tescom_b_output'    => ['nullable', 'string', 'max:100'],
+            // Items: each carries a `values` map keyed by composite "panel_id.sub_col_key".
+            'items'          => ['required', 'array', 'min:1'],
+            'items.*.id'     => ['required', 'integer'],
+            'items.*.values' => ['nullable', 'array'],
+            'items.*.values.*' => ['nullable'],
 
             // Facilities (optional)
             'facilities'              => ['sometimes', 'array'],

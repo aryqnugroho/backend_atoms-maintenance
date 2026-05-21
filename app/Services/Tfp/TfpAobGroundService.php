@@ -177,6 +177,7 @@ class TfpAobGroundService
                 'time_filled'     => now()->format('H:i'),
                 'shift_type'      => $shiftType,
                 'location'        => $location,
+                'columns_config'  => TfpAobGroundTemplate::defaultColumnsConfig(),
                 'status'          => 'ongoing',
                 'manager_id'      => $manager?->id,
                 'manager_name'    => $manager?->name,
@@ -312,17 +313,12 @@ class TfpAobGroundService
      * Update item values on an existing record.
      * Personnel, signatures, dates, and form numbers are NOT touched here.
      *
-     * @param array<int, array{
-     *   id:int,
-     *   panel_cos_a03_input?:string|null,
-     *   panel_cos_a03_output?:string|null,
-     *   panel_ats_a12_input?:string|null,
-     *   panel_ats_a12_output?:string|null,
-     *   ups_tescom_a_input?:string|null,
-     *   ups_tescom_a_output?:string|null,
-     *   ups_tescom_b_input?:string|null,
-     *   ups_tescom_b_output?:string|null,
-     * }> $items
+     * Each item payload carries a `values` map keyed by composite
+     * "panel_id.sub_col_key" cell keys. Cells that the per-item
+     * is_disabled_map marks as disabled are silently dropped so that the
+     * frontend cannot accidentally write to grey cells.
+     *
+     * @param array<int, array{ id:int, values?: array<string, string|null> }> $items
      */
     public function updateItems(TfpAobGroundRecord $record, array $items, ?string $timeOverride = null): TfpAobGroundRecord
     {
@@ -330,7 +326,11 @@ class TfpAobGroundService
             throw new RuntimeException('Form yang sudah completed tidak dapat diubah lagi.');
         }
 
-        return DB::transaction(function () use ($record, $items, $timeOverride) {
+        // Build the set of allowed cell keys from columns_config so the server
+        // also rejects keys for panels the user has not defined.
+        $allowedKeys = $this->cellKeysFromConfig($record);
+
+        return DB::transaction(function () use ($record, $items, $timeOverride, $allowedKeys) {
             $existing = $record->items()->get()->keyBy('id');
 
             foreach ($items as $payload) {
@@ -340,28 +340,25 @@ class TfpAobGroundService
 
                 /** @var TfpAobGroundItem $item */
                 $item = $existing->get($payload['id']);
-
-                // Allowed value columns. We strip disabled columns per row so that
-                // the frontend (or any client) cannot accidentally write to grey
-                // cells. is_disabled_map is the source of truth.
-                $allowed = [
-                    'panel_cos_a03_input',
-                    'panel_cos_a03_output',
-                    'panel_ats_a12_input',
-                    'panel_ats_a12_output',
-                    'ups_tescom_a_input',
-                    'ups_tescom_a_output',
-                    'ups_tescom_b_input',
-                    'ups_tescom_b_output',
-                ];
+                $incoming = is_array($payload['values'] ?? null) ? $payload['values'] : [];
 
                 $disabledMap = is_array($item->is_disabled_map) ? $item->is_disabled_map : [];
-                $effective = array_diff(
-                    $allowed,
-                    array_keys(array_filter($disabledMap, static fn ($v) => $v === true))
-                );
+                $disabledKeys = array_keys(array_filter($disabledMap, static fn ($v) => $v === true));
 
-                $item->fill(array_intersect_key($payload, array_flip($effective)));
+                $clean = [];
+                foreach ($incoming as $cellKey => $cellVal) {
+                    if (!is_string($cellKey)) continue;
+                    if (in_array($cellKey, $disabledKeys, true)) continue;
+                    if (!empty($allowedKeys) && !in_array($cellKey, $allowedKeys, true)) continue;
+
+                    $stringVal = $cellVal === null ? null : trim((string) $cellVal);
+                    if ($stringVal === null || $stringVal === '') {
+                        continue; // skip — we don't persist blank cells
+                    }
+                    $clean[$cellKey] = mb_substr($stringVal, 0, 100);
+                }
+
+                $item->values = empty($clean) ? null : $clean;
                 $item->save();
             }
 
@@ -371,14 +368,31 @@ class TfpAobGroundService
             $record->time_filled = $timeOverride ?: now()->format('H:i');
             $record->save();
 
-            return $record->fresh([
-                'technicians',
-                'items',
-                'facilities',
-                'manager:id,name',
-                'supervisor:id,name',
-            ]);
+            return $this->fresh($record);
         });
+    }
+
+    /**
+     * Compute the set of allowed cell keys from the record's columns_config.
+     * Returns an empty array if columns_config is missing (treated as "anything goes",
+     * mainly useful for legacy data without a config yet).
+     *
+     * @return string[]
+     */
+    private function cellKeysFromConfig(TfpAobGroundRecord $record): array
+    {
+        $config = is_array($record->columns_config) ? $record->columns_config : [];
+        $keys = [];
+        foreach ($config as $panel) {
+            $pid = $panel['id'] ?? null;
+            $subs = $panel['sub_columns'] ?? [];
+            if (!$pid || !is_array($subs)) continue;
+            foreach ($subs as $sub) {
+                $sk = $sub['key'] ?? null;
+                if ($sk) $keys[] = $pid . '.' . $sk;
+            }
+        }
+        return $keys;
     }
 
     /**
@@ -447,17 +461,11 @@ class TfpAobGroundService
             'parameter_number'     => $data['parameter_number'] ?? (string) ($maxSort + 2),
             'parameter_name'       => trim((string) $data['parameter_name']),
             'unit'                 => isset($data['unit']) ? trim((string) $data['unit']) : null,
-            'panel_cos_a03_input'  => null,
-            'panel_cos_a03_output' => null,
-            'panel_ats_a12_input'  => null,
-            'panel_ats_a12_output' => null,
-            'ups_tescom_a_input'   => null,
-            'ups_tescom_a_output'  => null,
-            'ups_tescom_b_input'   => null,
-            'ups_tescom_b_output'  => null,
-            // New parameters default to "all cells enabled" — Manager can adjust
-            // disabled cells later if a dedicated UI for it is added.
+            // New parameters default to "all cells enabled, no merges" — Manager
+            // can toggle these later via the structure editor.
+            'values'               => null,
             'is_disabled_map'      => null,
+            'merge_map'            => null,
             'sort_order'           => $maxSort + 1,
         ]);
 
@@ -615,6 +623,151 @@ class TfpAobGroundService
             'manager:id,name',
             'supervisor:id,name',
         ]);
+    }
+
+    /**
+     * Batch save the structural edit made in Edit Mode:
+     *   - columns_config: new panel/sub-column layout (replaces existing)
+     *   - items[].is_disabled_map: per-item disabled cells (keyed by composite)
+     *   - items[].merge_map:       per-item merged cells  (key → colspan int)
+     *
+     * Values are NOT touched here. After saving, cells whose keys are no longer
+     * present in columns_config become orphaned in the `values` JSON; we strip
+     * them so the next fetch returns only valid cells.
+     *
+     * @param array $columnsConfig  new columns_config array
+     * @param array $itemPatches    [{id, is_disabled_map, merge_map}]
+     */
+    public function saveStructure(TfpAobGroundRecord $record, array $columnsConfig, array $itemPatches): TfpAobGroundRecord
+    {
+        if ($record->status === 'completed') {
+            throw new RuntimeException('Form yang sudah completed tidak dapat diubah strukturnya.');
+        }
+
+        $normalized = $this->normalizeColumnsConfig($columnsConfig);
+        if (empty($normalized)) {
+            throw new InvalidArgumentException('Minimal harus ada satu panel dengan satu sub-kolom.');
+        }
+
+        $allowedKeys = [];
+        foreach ($normalized as $panel) {
+            foreach ($panel['sub_columns'] as $sub) {
+                $allowedKeys[] = $panel['id'] . '.' . $sub['key'];
+            }
+        }
+
+        return DB::transaction(function () use ($record, $normalized, $itemPatches, $allowedKeys) {
+            $record->columns_config = $normalized;
+            $record->save();
+
+            $existing = $record->items()->get()->keyBy('id');
+
+            // Apply per-item patches and prune orphaned values
+            foreach ($itemPatches as $patch) {
+                if (empty($patch['id']) || !$existing->has($patch['id'])) continue;
+
+                /** @var TfpAobGroundItem $item */
+                $item = $existing->get($patch['id']);
+
+                if (array_key_exists('is_disabled_map', $patch)) {
+                    $map = is_array($patch['is_disabled_map']) ? $patch['is_disabled_map'] : [];
+                    $clean = [];
+                    foreach ($map as $k => $v) {
+                        if (is_string($k) && in_array($k, $allowedKeys, true) && $v === true) {
+                            $clean[$k] = true;
+                        }
+                    }
+                    $item->is_disabled_map = empty($clean) ? null : $clean;
+                }
+
+                if (array_key_exists('merge_map', $patch)) {
+                    $map = is_array($patch['merge_map']) ? $patch['merge_map'] : [];
+                    $clean = [];
+                    foreach ($map as $k => $v) {
+                        $span = (int) $v;
+                        if (is_string($k) && in_array($k, $allowedKeys, true) && $span >= 2) {
+                            $clean[$k] = $span;
+                        }
+                    }
+                    $item->merge_map = empty($clean) ? null : $clean;
+                }
+
+                // Prune orphan values whose keys are no longer in columns_config
+                $values = is_array($item->values) ? $item->values : [];
+                $prunedValues = array_intersect_key($values, array_flip($allowedKeys));
+                if (count($prunedValues) !== count($values)) {
+                    $item->values = empty($prunedValues) ? null : $prunedValues;
+                }
+
+                $item->save();
+            }
+
+            // Also prune items not in $itemPatches (only orphan-strip, no flag change)
+            $patchedIds = array_filter(array_map(fn ($p) => $p['id'] ?? null, $itemPatches));
+            foreach ($existing as $item) {
+                if (in_array($item->id, $patchedIds, true)) continue;
+                $values = is_array($item->values) ? $item->values : [];
+                $prunedValues = array_intersect_key($values, array_flip($allowedKeys));
+                if (count($prunedValues) !== count($values)) {
+                    $item->values = empty($prunedValues) ? null : $prunedValues;
+                    $item->save();
+                }
+            }
+
+            return $this->fresh($record);
+        });
+    }
+
+    /**
+     * Normalize columns_config: ensure ids are slugged & unique, sub_columns
+     * have keys & labels, and the array is re-indexed. Drops malformed entries.
+     */
+    private function normalizeColumnsConfig(array $raw): array
+    {
+        $out = [];
+        $seenIds = [];
+
+        foreach ($raw as $panel) {
+            $id    = isset($panel['id'])    ? $this->slug((string) $panel['id'])    : null;
+            $label = isset($panel['label']) ? trim((string) $panel['label']) : '';
+            $subs  = isset($panel['sub_columns']) && is_array($panel['sub_columns']) ? $panel['sub_columns'] : [];
+
+            if (!$id || $label === '' || empty($subs)) continue;
+            if (in_array($id, $seenIds, true)) continue;
+
+            $cleanSubs = [];
+            $seenSubKeys = [];
+            foreach ($subs as $sub) {
+                $sk = isset($sub['key'])   ? $this->slug((string) $sub['key'])   : null;
+                $sl = isset($sub['label']) ? trim((string) $sub['label']) : '';
+                if (!$sk || $sl === '' || in_array($sk, $seenSubKeys, true)) continue;
+                $cleanSubs[] = ['key' => $sk, 'label' => mb_substr($sl, 0, 60)];
+                $seenSubKeys[] = $sk;
+            }
+
+            if (empty($cleanSubs)) continue;
+
+            $out[] = [
+                'id'          => $id,
+                'label'       => mb_substr($label, 0, 80),
+                'sub_columns' => $cleanSubs,
+            ];
+            $seenIds[] = $id;
+        }
+
+        return $out;
+    }
+
+    /**
+     * Slug a string into a stable key: lowercase, replace non-alnum with "_",
+     * collapse repeats, trim leading/trailing underscores.
+     */
+    private function slug(string $raw): string
+    {
+        $s = mb_strtolower(trim($raw));
+        $s = preg_replace('/[^a-z0-9]+/u', '_', $s) ?? '';
+        $s = preg_replace('/_+/', '_', $s) ?? '';
+        return trim($s, '_');
     }
 
     // ─── Sign ──────────────────────────────────────────────────

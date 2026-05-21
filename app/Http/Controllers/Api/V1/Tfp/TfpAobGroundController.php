@@ -6,6 +6,7 @@ use App\Exceptions\SignerNotAuthorizedException;
 use App\Exceptions\TfpAobGroundDuplicateException;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Tfp\CreateTfpAobGroundRequest;
+use App\Http\Requests\Tfp\SaveTfpAobGroundStructureRequest;
 use App\Http\Requests\Tfp\SignTfpAobGroundRequest;
 use App\Http\Requests\Tfp\UpdateTfpAobGroundRequest;
 use App\Models\Tfp\TfpAobGroundRecord;
@@ -169,6 +170,39 @@ class TfpAobGroundController extends Controller
     }
 
     // ─── Structural edit (Manager / Supervisor / Admin only) ──────────────
+
+    /**
+     * PUT /api/v1/tfp/aob-ground/{id}/structure
+     *
+     * Batch save the Excel-like editor state: columns_config + per-item
+     * disabled / merge maps. Replaces existing values atomically.
+     */
+    public function saveStructure(SaveTfpAobGroundStructureRequest $request, int $id): JsonResponse
+    {
+        $record = TfpAobGroundRecord::find($id);
+        if (!$record) {
+            return $this->error('Form tidak ditemukan.', null, 404);
+        }
+        if (!$this->canEditStructure()) {
+            return $this->error('Hanya Manager Teknik atau Supervisor TFP yang dapat mengubah struktur tabel.', null, 403);
+        }
+
+        $payload = $request->validated();
+
+        try {
+            $record = $this->service->saveStructure(
+                $record,
+                $payload['columns_config'],
+                $payload['items'] ?? [],
+            );
+        } catch (InvalidArgumentException $e) {
+            return $this->error($e->getMessage(), null, 422);
+        } catch (RuntimeException $e) {
+            return $this->error($e->getMessage(), null, 409);
+        }
+
+        return $this->success($this->detailRecord($record), 'Struktur tabel berhasil disimpan.');
+    }
 
     /**
      * POST /api/v1/tfp/aob-ground/{id}/parameters
@@ -468,15 +502,16 @@ class TfpAobGroundController extends Controller
         ]);
 
         return [
-            'id'          => $r->id,
-            'form_number' => $r->form_number,
-            'form_type'   => $r->form_type,
-            'date'        => $r->date?->format('Y-m-d'),
-            'day_name'    => $r->day_name,
-            'time_filled' => $r->time_filled,
-            'shift_type'  => $r->shift_type,
-            'location'    => $r->location,
-            'status'      => $r->status,
+            'id'             => $r->id,
+            'form_number'    => $r->form_number,
+            'form_type'      => $r->form_type,
+            'date'           => $r->date?->format('Y-m-d'),
+            'day_name'       => $r->day_name,
+            'time_filled'    => $r->time_filled,
+            'shift_type'     => $r->shift_type,
+            'location'       => $r->location,
+            'columns_config' => $r->columns_config ?: TfpAobGroundTemplate::defaultColumnsConfig(),
+            'status'         => $r->status,
             'manager' => $r->manager_name ? [
                 'id'        => $r->manager_id,
                 'name'      => $r->manager_name,
@@ -501,20 +536,14 @@ class TfpAobGroundController extends Controller
                 'sort_order'      => $t->sort_order,
             ])->values()->toArray(),
             'items' => $r->items->map(fn ($it) => [
-                'id'                   => $it->id,
-                'parameter_number'     => $it->parameter_number,
-                'parameter_name'       => $it->parameter_name,
-                'unit'                 => $it->unit,
-                'panel_cos_a03_input'  => $it->panel_cos_a03_input,
-                'panel_cos_a03_output' => $it->panel_cos_a03_output,
-                'panel_ats_a12_input'  => $it->panel_ats_a12_input,
-                'panel_ats_a12_output' => $it->panel_ats_a12_output,
-                'ups_tescom_a_input'   => $it->ups_tescom_a_input,
-                'ups_tescom_a_output'  => $it->ups_tescom_a_output,
-                'ups_tescom_b_input'   => $it->ups_tescom_b_input,
-                'ups_tescom_b_output'  => $it->ups_tescom_b_output,
-                'is_disabled_map'      => $it->is_disabled_map,
-                'sort_order'           => $it->sort_order,
+                'id'               => $it->id,
+                'parameter_number' => $it->parameter_number,
+                'parameter_name'   => $it->parameter_name,
+                'unit'             => $it->unit,
+                'values'           => is_array($it->values) ? $it->values : (object) [],
+                'is_disabled_map'  => is_array($it->is_disabled_map) ? $it->is_disabled_map : (object) [],
+                'merge_map'        => is_array($it->merge_map) ? $it->merge_map : (object) [],
+                'sort_order'       => $it->sort_order,
             ])->values()->toArray(),
             'facilities' => $r->facilities->map(fn ($f) => [
                 'id'            => $f->id,

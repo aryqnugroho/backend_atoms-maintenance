@@ -322,6 +322,7 @@ Route::prefix('v1')->group(function () {
                 ->middleware('role:Admin,Manager Teknik');
 
             // Structural edit (Edit Mode) — controller enforces role guard
+            Route::put('/{id}/structure',              [TfpAobGroundController::class, 'saveStructure'])->whereNumber('id');
             Route::post('/{id}/parameters',            [TfpAobGroundController::class, 'addParameter'])->whereNumber('id');
             Route::put('/{id}/parameters/{paramId}',   [TfpAobGroundController::class, 'updateParameter'])->whereNumber(['id', 'paramId']);
             Route::delete('/{id}/parameters/{paramId}', [TfpAobGroundController::class, 'deleteParameter'])->whereNumber(['id', 'paramId']);
