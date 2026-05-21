@@ -413,6 +413,17 @@ Route::prefix('v1')->group(function () {
             Route::delete('/{id}', [TfpRadarController::class, 'destroy'])
                 ->whereNumber('id')
                 ->middleware('role:Admin,Manager Teknik');
+
+            // Structural edit (Edit Mode) — controller enforces role guard
+            Route::put('/{id}/structure',                  [TfpRadarController::class, 'saveStructure'])->whereNumber('id');
+            Route::post('/{id}/parameters',                [TfpRadarController::class, 'addParameter'])->whereNumber('id');
+            Route::put('/{id}/parameters/{paramId}',       [TfpRadarController::class, 'updateParameter'])->whereNumber(['id', 'paramId']);
+            Route::delete('/{id}/parameters/{paramId}',    [TfpRadarController::class, 'deleteParameter'])->whereNumber(['id', 'paramId']);
+            Route::put('/{id}/parameters-reorder',         [TfpRadarController::class, 'reorderParameters'])->whereNumber('id');
+            Route::post('/{id}/facilities',                [TfpRadarController::class, 'addFacility'])->whereNumber('id');
+            Route::put('/{id}/facilities/{facilityId}',    [TfpRadarController::class, 'updateFacility'])->whereNumber(['id', 'facilityId']);
+            Route::delete('/{id}/facilities/{facilityId}', [TfpRadarController::class, 'deleteFacility'])->whereNumber(['id', 'facilityId']);
+            Route::put('/{id}/facilities-reorder',         [TfpRadarController::class, 'reorderFacilities'])->whereNumber('id');
         });
 
         // ─── TFP Performance Check Gedung DVOR (VOR) ───────────────

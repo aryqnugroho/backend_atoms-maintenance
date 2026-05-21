@@ -5,20 +5,33 @@ namespace App\Models\Tfp;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
+/**
+ * TfpRadarItem — one measurement parameter row for a TFP Radar record.
+ *
+ * Cell values live in `values` JSON, keyed by composite "panelId.subKey"
+ * (e.g. "panel_cos_rd03.input"). Panel structure is defined per record via
+ * tfp_radar_records.columns_config.
+ */
 class TfpRadarItem extends Model
 {
     protected $table = 'tfp_radar_items';
 
     protected $fillable = [
-        'radar_record_id', 'parameter_number', 'parameter_name', 'unit',
-        'panel_rd01', 'panel_rd02',
-        'panel_cos_rd03_input', 'panel_cos_rd03_output',
-        'ups_topaz_input', 'ups_topaz_output',
-        'panel_rd04', 'panel_rd05', 'panel_rd06', 'panel_rd07', 'panel_rd08',
-        'is_disabled_map', 'sort_order',
+        'radar_record_id',
+        'parameter_number', 'parameter_name', 'unit',
+        'values', 'is_disabled_map', 'merge_map',
+        'sort_order',
     ];
 
-    protected $casts = ['is_disabled_map' => 'array', 'sort_order' => 'integer'];
+    protected $casts = [
+        'values'          => 'array',
+        'is_disabled_map' => 'array',
+        'merge_map'       => 'array',
+        'sort_order'      => 'integer',
+    ];
 
-    public function record(): BelongsTo { return $this->belongsTo(TfpRadarRecord::class, 'radar_record_id'); }
+    public function record(): BelongsTo
+    {
+        return $this->belongsTo(TfpRadarRecord::class, 'radar_record_id');
+    }
 }
