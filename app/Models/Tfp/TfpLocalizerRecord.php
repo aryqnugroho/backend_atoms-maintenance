@@ -18,7 +18,7 @@ class TfpLocalizerRecord extends Model
 
     protected $fillable = [
         'form_number', 'form_type', 'date', 'day_name', 'time_filled',
-        'shift_type', 'location', 'status',
+        'shift_type', 'location', 'columns_config', 'status',
         'manager_id', 'manager_name', 'manager_signature', 'manager_signed_by', 'manager_signed_at',
         'supervisor_id', 'supervisor_name', 'supervisor_signature', 'supervisor_signed_by', 'supervisor_signed_at',
         'created_by_id', 'created_by_name',
@@ -26,6 +26,7 @@ class TfpLocalizerRecord extends Model
 
     protected $casts = [
         'date'                 => 'date:Y-m-d',
+        'columns_config'       => 'array',
         'manager_signed_at'    => 'datetime',
         'supervisor_signed_at' => 'datetime',
     ];

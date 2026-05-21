@@ -476,6 +476,17 @@ Route::prefix('v1')->group(function () {
             Route::delete('/{id}', [TfpLocalizerController::class, 'destroy'])
                 ->whereNumber('id')
                 ->middleware('role:Admin,Manager Teknik');
+
+            // Structural edit (Edit Mode) — controller enforces role guard
+            Route::put('/{id}/structure',                  [TfpLocalizerController::class, 'saveStructure'])->whereNumber('id');
+            Route::post('/{id}/parameters',                [TfpLocalizerController::class, 'addParameter'])->whereNumber('id');
+            Route::put('/{id}/parameters/{paramId}',       [TfpLocalizerController::class, 'updateParameter'])->whereNumber(['id', 'paramId']);
+            Route::delete('/{id}/parameters/{paramId}',    [TfpLocalizerController::class, 'deleteParameter'])->whereNumber(['id', 'paramId']);
+            Route::put('/{id}/parameters-reorder',         [TfpLocalizerController::class, 'reorderParameters'])->whereNumber('id');
+            Route::post('/{id}/facilities',                [TfpLocalizerController::class, 'addFacility'])->whereNumber('id');
+            Route::put('/{id}/facilities/{facilityId}',    [TfpLocalizerController::class, 'updateFacility'])->whereNumber(['id', 'facilityId']);
+            Route::delete('/{id}/facilities/{facilityId}', [TfpLocalizerController::class, 'deleteFacility'])->whereNumber(['id', 'facilityId']);
+            Route::put('/{id}/facilities-reorder',         [TfpLocalizerController::class, 'reorderFacilities'])->whereNumber('id');
         });
 
         // ─── TFP Performance Check Gedung Glide Path ────────────────
