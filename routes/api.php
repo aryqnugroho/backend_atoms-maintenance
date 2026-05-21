@@ -398,6 +398,17 @@ Route::prefix('v1')->group(function () {
             Route::delete('/{id}', [TfpTowerController::class, 'destroy'])
                 ->whereNumber('id')
                 ->middleware('role:Admin,Manager Teknik');
+
+            // Structural edit (Edit Mode) — controller enforces role guard
+            Route::put('/{id}/structure',                  [TfpTowerController::class, 'saveStructure'])->whereNumber('id');
+            Route::post('/{id}/parameters',                [TfpTowerController::class, 'addParameter'])->whereNumber('id');
+            Route::put('/{id}/parameters/{paramId}',       [TfpTowerController::class, 'updateParameter'])->whereNumber(['id', 'paramId']);
+            Route::delete('/{id}/parameters/{paramId}',    [TfpTowerController::class, 'deleteParameter'])->whereNumber(['id', 'paramId']);
+            Route::put('/{id}/parameters-reorder',         [TfpTowerController::class, 'reorderParameters'])->whereNumber('id');
+            Route::post('/{id}/facilities',                [TfpTowerController::class, 'addFacility'])->whereNumber('id');
+            Route::put('/{id}/facilities/{facilityId}',    [TfpTowerController::class, 'updateFacility'])->whereNumber(['id', 'facilityId']);
+            Route::delete('/{id}/facilities/{facilityId}', [TfpTowerController::class, 'deleteFacility'])->whereNumber(['id', 'facilityId']);
+            Route::put('/{id}/facilities-reorder',         [TfpTowerController::class, 'reorderFacilities'])->whereNumber('id');
         });
 
         // ─── TFP Performance Check Gedung Radar ────────────────────

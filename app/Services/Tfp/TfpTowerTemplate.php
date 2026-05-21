@@ -3,124 +3,123 @@
 namespace App\Services\Tfp;
 
 /**
- * TfpTowerTemplate — canonical parameter and facility list for the
- * TFP Performance Check Gedung Tower form.
+ * TfpTowerTemplate — Performance Check Gedung Tower form.
  *
- * 23 measurement parameters, 14 facility items.
+ * 23 parameters × 10 panels (11 cells total — panel_ats_a13 has Input/Output split):
+ *   panel_a10 (1)     panel_a11 (1)     panel_ats_a13 (Input/Output)
+ *   panel_a14 (1)     panel_a16 (1)     panel_a17 (1)
+ *   panel_a18 (1)     panel_a19 (1)     panel_a20 (1)
+ *   panel_milat_ru1213 (1)
  *
- * Panel columns (11 total):
- *   panel_a10, panel_a11 — single columns
- *   panel_ats_a13_input, panel_ats_a13_output — Panel ATS (A 13)
- *   panel_a14, panel_a16, panel_a17, panel_a18, panel_a19, panel_a20 — single columns
- *   panel_milat_ru1213 — single column
- *
- * Disabled cell rules (from form image):
- *   Rows 1-12  : all columns enabled
- *   Row 13     : Power Factor — A10, A11, A14, A16, A17, A18, A19, A20, MILAT disabled
- *   Rows 14-17 : Battery — A10, A11, ATS input/output, A14, A16, A17, A18, A19, A20, MILAT disabled
- *   Rows 18-19 : Mode/Suplai — A10, A11, A14, A16, A17, A18, A19, A20, MILAT disabled
- *   Row 20     : KWH Meter — single value in panel_ats_a13_input, rest disabled
- *   Rows 21-23 : Suhu rows — single value in panel_a10, rest disabled
+ * Disabled cell rules:
+ *   Rows 1-12  : all 11 cells enabled
+ *   Row 13     : Power Factor — only panel_ats_a13 active
+ *   Rows 14-17 : Battery — ALL cells disabled (Tower has no battery — placeholder rows)
+ *   Rows 18-19 : Mode/Suplai — only panel_ats_a13 active
+ *   Row 20     : KWH Meter — single value in panel_ats_a13.input, merge_map=2 across IO
+ *   Rows 21-23 : Suhu rows — single value in panel_a10, merge_map=11 to span all
  */
 class TfpTowerTemplate
 {
-    public static function parameters(): array
+    public static function defaultColumnsConfig(): array
     {
-        $noDisabled = [];
-
-        // Row 13 (Power Factor): A10, A11, A14, A16, A17, A18, A19, A20, MILAT disabled
-        $disabledPowerFactor = [
-            'panel_a10'          => true,
-            'panel_a11'          => true,
-            'panel_a14'          => true,
-            'panel_a16'          => true,
-            'panel_a17'          => true,
-            'panel_a18'          => true,
-            'panel_a19'          => true,
-            'panel_a20'          => true,
-            'panel_milat_ru1213' => true,
-        ];
-
-        // Rows 14-17 (Battery): all columns disabled except none (all disabled)
-        $disabledBattery = [
-            'panel_a10'              => true,
-            'panel_a11'              => true,
-            'panel_ats_a13_input'    => true,
-            'panel_ats_a13_output'   => true,
-            'panel_a14'              => true,
-            'panel_a16'              => true,
-            'panel_a17'              => true,
-            'panel_a18'              => true,
-            'panel_a19'              => true,
-            'panel_a20'              => true,
-            'panel_milat_ru1213'     => true,
-        ];
-
-        // Rows 18-19 (Mode/Suplai): A10, A11, A14, A16, A17, A18, A19, A20, MILAT disabled
-        $disabledModeSupplai = [
-            'panel_a10'          => true,
-            'panel_a11'          => true,
-            'panel_a14'          => true,
-            'panel_a16'          => true,
-            'panel_a17'          => true,
-            'panel_a18'          => true,
-            'panel_a19'          => true,
-            'panel_a20'          => true,
-            'panel_milat_ru1213' => true,
-        ];
-
-        // Row 20 (KWH Meter): single value in panel_ats_a13_input, rest disabled
-        $disabledKwh = [
-            'panel_a10'              => true,
-            'panel_a11'              => true,
-            'panel_ats_a13_output'   => true,
-            'panel_a14'              => true,
-            'panel_a16'              => true,
-            'panel_a17'              => true,
-            'panel_a18'              => true,
-            'panel_a19'              => true,
-            'panel_a20'              => true,
-            'panel_milat_ru1213'     => true,
-        ];
-
-        // Rows 21-23 (Suhu): single value in panel_a10, rest disabled
-        $disabledSuhu = [
-            'panel_a11'              => true,
-            'panel_ats_a13_input'    => true,
-            'panel_ats_a13_output'   => true,
-            'panel_a14'              => true,
-            'panel_a16'              => true,
-            'panel_a17'              => true,
-            'panel_a18'              => true,
-            'panel_a19'              => true,
-            'panel_a20'              => true,
-            'panel_milat_ru1213'     => true,
-        ];
+        $single = [['key' => 'value',  'label' => 'Nilai']];
+        $io     = [['key' => 'input',  'label' => 'Input'], ['key' => 'output', 'label' => 'Output']];
 
         return [
-            ['parameter_number' => '1',  'parameter_name' => 'L1 - N',              'unit' => 'Volt',   'is_disabled_map' => $noDisabled],
-            ['parameter_number' => '2',  'parameter_name' => 'L2 - N',              'unit' => 'Volt',   'is_disabled_map' => $noDisabled],
-            ['parameter_number' => '3',  'parameter_name' => 'L3 - N',              'unit' => 'Volt',   'is_disabled_map' => $noDisabled],
-            ['parameter_number' => '4',  'parameter_name' => 'N - G',               'unit' => 'Volt',   'is_disabled_map' => $noDisabled],
-            ['parameter_number' => '5',  'parameter_name' => 'L1 - L2',             'unit' => 'Volt',   'is_disabled_map' => $noDisabled],
-            ['parameter_number' => '6',  'parameter_name' => 'L1 - L3',             'unit' => 'Volt',   'is_disabled_map' => $noDisabled],
-            ['parameter_number' => '7',  'parameter_name' => 'L2 - L3',             'unit' => 'Volt',   'is_disabled_map' => $noDisabled],
-            ['parameter_number' => '8',  'parameter_name' => 'L1',                  'unit' => 'Ampere', 'is_disabled_map' => $noDisabled],
-            ['parameter_number' => '9',  'parameter_name' => 'L2',                  'unit' => 'Ampere', 'is_disabled_map' => $noDisabled],
-            ['parameter_number' => '10', 'parameter_name' => 'L3',                  'unit' => 'Ampere', 'is_disabled_map' => $noDisabled],
-            ['parameter_number' => '11', 'parameter_name' => 'N',                   'unit' => 'Ampere', 'is_disabled_map' => $noDisabled],
-            ['parameter_number' => '12', 'parameter_name' => 'Frekuensi',           'unit' => 'Hz',     'is_disabled_map' => $noDisabled],
-            ['parameter_number' => '13', 'parameter_name' => 'Power Factor (Cos θ)', 'unit' => null,    'is_disabled_map' => $disabledPowerFactor],
-            ['parameter_number' => '14', 'parameter_name' => 'Tegangan Battery',    'unit' => 'Volt',   'is_disabled_map' => $disabledBattery],
-            ['parameter_number' => '15', 'parameter_name' => 'Arus Battery',        'unit' => 'Ampere', 'is_disabled_map' => $disabledBattery],
-            ['parameter_number' => '16', 'parameter_name' => 'Kapasitas Battery',   'unit' => 'Ah',     'is_disabled_map' => $disabledBattery],
-            ['parameter_number' => '17', 'parameter_name' => 'Suhu Battery',        'unit' => '°C',     'is_disabled_map' => $disabledBattery],
-            ['parameter_number' => '18', 'parameter_name' => 'Mode *',              'unit' => null,     'is_disabled_map' => $disabledModeSupplai],
-            ['parameter_number' => '19', 'parameter_name' => 'Suplai Aktif *',      'unit' => null,     'is_disabled_map' => $disabledModeSupplai],
-            ['parameter_number' => '20', 'parameter_name' => 'KWH Meter',           'unit' => null,     'is_disabled_map' => $disabledKwh],
-            ['parameter_number' => '21', 'parameter_name' => 'Suhu Tower Lt 11',    'unit' => '°C',     'is_disabled_map' => $disabledSuhu],
-            ['parameter_number' => '22', 'parameter_name' => 'Suhu Ruang RX',       'unit' => '°C',     'is_disabled_map' => $disabledSuhu],
-            ['parameter_number' => '23', 'parameter_name' => 'Suhu Cabin Tower',    'unit' => '°C',     'is_disabled_map' => $disabledSuhu],
+            ['id' => 'panel_a10',          'label' => 'Panel A 10',             'sub_columns' => $single],
+            ['id' => 'panel_a11',          'label' => 'Panel A 11',             'sub_columns' => $single],
+            ['id' => 'panel_ats_a13',      'label' => 'Panel ATS (A 13)',       'sub_columns' => $io],
+            ['id' => 'panel_a14',          'label' => 'Panel A 14',             'sub_columns' => $single],
+            ['id' => 'panel_a16',          'label' => 'Panel A 16',             'sub_columns' => $single],
+            ['id' => 'panel_a17',          'label' => 'Panel A 17',             'sub_columns' => $single],
+            ['id' => 'panel_a18',          'label' => 'Panel A 18',             'sub_columns' => $single],
+            ['id' => 'panel_a19',          'label' => 'Panel A 19',             'sub_columns' => $single],
+            ['id' => 'panel_a20',          'label' => 'Panel A 20',             'sub_columns' => $single],
+            ['id' => 'panel_milat_ru1213', 'label' => 'Panel MILAT (RU 12/13)', 'sub_columns' => $single],
+        ];
+    }
+
+    public static function defaultCellKeys(): array
+    {
+        $keys = [];
+        foreach (self::defaultColumnsConfig() as $panel) {
+            foreach ($panel['sub_columns'] as $sub) {
+                $keys[] = $panel['id'] . '.' . $sub['key'];
+            }
+        }
+        return $keys;
+    }
+
+    public static function parameters(): array
+    {
+        $allKeys = self::defaultCellKeys();
+
+        // Row 13 (Power Factor): only panel_ats_a13 active
+        $disabledPowerFactor = [
+            'panel_a10.value'          => true,
+            'panel_a11.value'          => true,
+            'panel_a14.value'          => true,
+            'panel_a16.value'          => true,
+            'panel_a17.value'          => true,
+            'panel_a18.value'          => true,
+            'panel_a19.value'          => true,
+            'panel_a20.value'          => true,
+            'panel_milat_ru1213.value' => true,
+        ];
+
+        // Rows 14-17 (Battery): ALL cells disabled (Tower has no battery)
+        $disabledBattery = array_fill_keys($allKeys, true);
+
+        // Rows 18-19 (Mode/Suplai): same as Power Factor (only ATS active)
+        $disabledModeSupplai = $disabledPowerFactor;
+
+        // Row 20 (KWH Meter): single value at panel_ats_a13.input, merge_map=2 across IO
+        $disabledKwh = [
+            'panel_a10.value'          => true,
+            'panel_a11.value'          => true,
+            'panel_ats_a13.output'     => true,
+            'panel_a14.value'          => true,
+            'panel_a16.value'          => true,
+            'panel_a17.value'          => true,
+            'panel_a18.value'          => true,
+            'panel_a19.value'          => true,
+            'panel_a20.value'          => true,
+            'panel_milat_ru1213.value' => true,
+        ];
+        $mergeKwh = ['panel_ats_a13.input' => 2];
+
+        // Rows 21-23 (Suhu): single value in panel_a10.value, merge_map=11 to span all
+        $disabledSuhu = array_fill_keys(
+            array_values(array_filter($allKeys, fn ($k) => $k !== 'panel_a10.value')),
+            true,
+        );
+        $mergeSuhu = ['panel_a10.value' => count($allKeys)];
+
+        return [
+            ['parameter_number' => '1',  'parameter_name' => 'L1 - N',                'unit' => 'Volt',   'is_disabled_map' => [],                    'merge_map' => []],
+            ['parameter_number' => '2',  'parameter_name' => 'L2 - N',                'unit' => 'Volt',   'is_disabled_map' => [],                    'merge_map' => []],
+            ['parameter_number' => '3',  'parameter_name' => 'L3 - N',                'unit' => 'Volt',   'is_disabled_map' => [],                    'merge_map' => []],
+            ['parameter_number' => '4',  'parameter_name' => 'N - G',                 'unit' => 'Volt',   'is_disabled_map' => [],                    'merge_map' => []],
+            ['parameter_number' => '5',  'parameter_name' => 'L1 - L2',               'unit' => 'Volt',   'is_disabled_map' => [],                    'merge_map' => []],
+            ['parameter_number' => '6',  'parameter_name' => 'L1 - L3',               'unit' => 'Volt',   'is_disabled_map' => [],                    'merge_map' => []],
+            ['parameter_number' => '7',  'parameter_name' => 'L2 - L3',               'unit' => 'Volt',   'is_disabled_map' => [],                    'merge_map' => []],
+            ['parameter_number' => '8',  'parameter_name' => 'L1',                    'unit' => 'Ampere', 'is_disabled_map' => [],                    'merge_map' => []],
+            ['parameter_number' => '9',  'parameter_name' => 'L2',                    'unit' => 'Ampere', 'is_disabled_map' => [],                    'merge_map' => []],
+            ['parameter_number' => '10', 'parameter_name' => 'L3',                    'unit' => 'Ampere', 'is_disabled_map' => [],                    'merge_map' => []],
+            ['parameter_number' => '11', 'parameter_name' => 'N',                     'unit' => 'Ampere', 'is_disabled_map' => [],                    'merge_map' => []],
+            ['parameter_number' => '12', 'parameter_name' => 'Frekuensi',             'unit' => 'Hz',     'is_disabled_map' => [],                    'merge_map' => []],
+            ['parameter_number' => '13', 'parameter_name' => 'Power Factor (Cos θ)',  'unit' => null,     'is_disabled_map' => $disabledPowerFactor,  'merge_map' => []],
+            ['parameter_number' => '14', 'parameter_name' => 'Tegangan Battery',      'unit' => 'Volt',   'is_disabled_map' => $disabledBattery,      'merge_map' => []],
+            ['parameter_number' => '15', 'parameter_name' => 'Arus Battery',          'unit' => 'Ampere', 'is_disabled_map' => $disabledBattery,      'merge_map' => []],
+            ['parameter_number' => '16', 'parameter_name' => 'Kapasitas Battery',     'unit' => 'Ah',     'is_disabled_map' => $disabledBattery,      'merge_map' => []],
+            ['parameter_number' => '17', 'parameter_name' => 'Suhu Battery',          'unit' => '°C',     'is_disabled_map' => $disabledBattery,      'merge_map' => []],
+            ['parameter_number' => '18', 'parameter_name' => 'Mode *',                'unit' => null,     'is_disabled_map' => $disabledModeSupplai,  'merge_map' => []],
+            ['parameter_number' => '19', 'parameter_name' => 'Suplai Aktif *',        'unit' => null,     'is_disabled_map' => $disabledModeSupplai,  'merge_map' => []],
+            ['parameter_number' => '20', 'parameter_name' => 'KWH Meter',             'unit' => null,     'is_disabled_map' => $disabledKwh,          'merge_map' => $mergeKwh],
+            ['parameter_number' => '21', 'parameter_name' => 'Suhu Tower Lt 11',      'unit' => '°C',     'is_disabled_map' => $disabledSuhu,         'merge_map' => $mergeSuhu],
+            ['parameter_number' => '22', 'parameter_name' => 'Suhu Ruang RX',         'unit' => '°C',     'is_disabled_map' => $disabledSuhu,         'merge_map' => $mergeSuhu],
+            ['parameter_number' => '23', 'parameter_name' => 'Suhu Cabin Tower',      'unit' => '°C',     'is_disabled_map' => $disabledSuhu,         'merge_map' => $mergeSuhu],
         ];
     }
 
@@ -128,19 +127,19 @@ class TfpTowerTemplate
     {
         return [
             ['facility_name' => 'Catu Daya Listrik',       'keterangan' => null],
-            ['facility_name' => 'Penerangan',               'keterangan' => null],
-            ['facility_name' => 'Rotating Beacon',          'keterangan' => null],
-            ['facility_name' => 'Hazard Beacon',            'keterangan' => null],
-            ['facility_name' => 'AC 22 (Split Wall)',        'keterangan' => 'A'],
-            ['facility_name' => 'AC 23 (Split Wall)',        'keterangan' => 'A'],
-            ['facility_name' => 'Pompa Air Lt 5 Tower',     'keterangan' => null],
-            ['facility_name' => 'Lift',                     'keterangan' => null],
-            ['facility_name' => 'APAR/Fire Extinguisher',   'keterangan' => null],
-            ['facility_name' => 'Atap',                     'keterangan' => null],
-            ['facility_name' => 'Plafond',                  'keterangan' => null],
-            ['facility_name' => 'Dinding',                  'keterangan' => null],
-            ['facility_name' => 'Pintu',                    'keterangan' => null],
-            ['facility_name' => 'Door Lock',                'keterangan' => null],
+            ['facility_name' => 'Penerangan',              'keterangan' => null],
+            ['facility_name' => 'Rotating Beacon',         'keterangan' => null],
+            ['facility_name' => 'Hazard Beacon',           'keterangan' => null],
+            ['facility_name' => 'AC 22 (Split Wall)',      'keterangan' => 'A'],
+            ['facility_name' => 'AC 23 (Split Wall)',      'keterangan' => 'A'],
+            ['facility_name' => 'Pompa Air Lt 5 Tower',    'keterangan' => null],
+            ['facility_name' => 'Lift',                    'keterangan' => null],
+            ['facility_name' => 'APAR/Fire Extinguisher',  'keterangan' => null],
+            ['facility_name' => 'Atap',                    'keterangan' => null],
+            ['facility_name' => 'Plafond',                 'keterangan' => null],
+            ['facility_name' => 'Dinding',                 'keterangan' => null],
+            ['facility_name' => 'Pintu',                   'keterangan' => null],
+            ['facility_name' => 'Door Lock',               'keterangan' => null],
         ];
     }
 
@@ -150,27 +149,17 @@ class TfpTowerTemplate
         $sortOrder = 0;
         $now = now();
         foreach (self::parameters() as $param) {
-            $disabledMap = $param['is_disabled_map'];
             $rows[] = [
-                'tower_record_id'        => $recordId,
-                'parameter_number'       => $param['parameter_number'],
-                'parameter_name'         => $param['parameter_name'],
-                'unit'                   => $param['unit'],
-                'panel_a10'              => null,
-                'panel_a11'              => null,
-                'panel_ats_a13_input'    => null,
-                'panel_ats_a13_output'   => null,
-                'panel_a14'              => null,
-                'panel_a16'              => null,
-                'panel_a17'              => null,
-                'panel_a18'              => null,
-                'panel_a19'              => null,
-                'panel_a20'              => null,
-                'panel_milat_ru1213'     => null,
-                'is_disabled_map'        => empty($disabledMap) ? null : json_encode($disabledMap),
-                'sort_order'             => $sortOrder++,
-                'created_at'             => $now,
-                'updated_at'             => $now,
+                'tower_record_id'  => $recordId,
+                'parameter_number' => $param['parameter_number'],
+                'parameter_name'   => $param['parameter_name'],
+                'unit'             => $param['unit'],
+                'values'           => null,
+                'is_disabled_map'  => empty($param['is_disabled_map']) ? null : json_encode($param['is_disabled_map']),
+                'merge_map'        => empty($param['merge_map']) ? null : json_encode($param['merge_map']),
+                'sort_order'       => $sortOrder++,
+                'created_at'       => $now,
+                'updated_at'       => $now,
             ];
         }
         return $rows;
