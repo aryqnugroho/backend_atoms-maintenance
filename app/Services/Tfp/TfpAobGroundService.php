@@ -324,13 +324,13 @@ class TfpAobGroundService
      *   ups_tescom_b_output?:string|null,
      * }> $items
      */
-    public function updateItems(TfpAobGroundRecord $record, array $items): TfpAobGroundRecord
+    public function updateItems(TfpAobGroundRecord $record, array $items, ?string $timeOverride = null): TfpAobGroundRecord
     {
         if ($record->status === 'completed') {
             throw new RuntimeException('Form yang sudah completed tidak dapat diubah lagi.');
         }
 
-        return DB::transaction(function () use ($record, $items) {
+        return DB::transaction(function () use ($record, $items, $timeOverride) {
             $existing = $record->items()->get()->keyBy('id');
 
             foreach ($items as $payload) {
@@ -365,10 +365,10 @@ class TfpAobGroundService
                 $item->save();
             }
 
-            // Refresh the "Jam Pelaksanaan" so it reflects the most recent fill time.
-            // The user's official paper form treats the time as "when this set of
-            // readings was taken" — every Simpan Perubahan is a new fill.
-            $record->time_filled = now()->format('H:i');
+            // Refresh the "Jam Pelaksanaan" so it reflects when this set of readings was
+            // taken. The user can override this via the editable time input on the
+            // detail page (paper form treats time as "when this snapshot was taken").
+            $record->time_filled = $timeOverride ?: now()->format('H:i');
             $record->save();
 
             return $record->fresh([
@@ -390,13 +390,13 @@ class TfpAobGroundService
      *   keterangan?:string|null,
      * }> $facilities
      */
-    public function updateFacilities(TfpAobGroundRecord $record, array $facilities): TfpAobGroundRecord
+    public function updateFacilities(TfpAobGroundRecord $record, array $facilities, ?string $timeOverride = null): TfpAobGroundRecord
     {
         if ($record->status === 'completed') {
             throw new RuntimeException('Form yang sudah completed tidak dapat diubah lagi.');
         }
 
-        return DB::transaction(function () use ($record, $facilities) {
+        return DB::transaction(function () use ($record, $facilities, $timeOverride) {
             $existing = $record->facilities()->get()->keyBy('id');
 
             foreach ($facilities as $payload) {
@@ -415,7 +415,7 @@ class TfpAobGroundService
             }
 
             // Refresh time_filled to reflect when the user saved this snapshot.
-            $record->time_filled = now()->format('H:i');
+            $record->time_filled = $timeOverride ?: now()->format('H:i');
             $record->save();
 
             return $record->fresh([

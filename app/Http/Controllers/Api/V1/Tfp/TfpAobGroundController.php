@@ -114,12 +114,13 @@ class TfpAobGroundController extends Controller
         }
 
         $validated = $request->validated();
+        $timeOverride = $validated['time_filled'] ?? null;
 
         try {
-            $record = $this->service->updateItems($record, $validated['items']);
+            $record = $this->service->updateItems($record, $validated['items'], $timeOverride);
 
             if (!empty($validated['facilities'])) {
-                $record = $this->service->updateFacilities($record, $validated['facilities']);
+                $record = $this->service->updateFacilities($record, $validated['facilities'], $timeOverride);
             }
         } catch (RuntimeException $e) {
             return $this->error($e->getMessage(), null, 409);

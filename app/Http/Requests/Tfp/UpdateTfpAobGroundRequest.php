@@ -19,6 +19,9 @@ class UpdateTfpAobGroundRequest extends FormRequest
     public function rules(): array
     {
         return [
+            // Optional explicit time override (HH:MM). Falls back to now() on the server when omitted.
+            'time_filled'                    => ['nullable', 'string', 'regex:/^([01]\d|2[0-3]):[0-5]\d$/'],
+
             // Items (measurement parameters)
             'items'                          => ['required', 'array', 'min:1'],
             'items.*.id'                     => ['required', 'integer'],
@@ -34,7 +37,7 @@ class UpdateTfpAobGroundRequest extends FormRequest
             // Facilities (optional)
             'facilities'              => ['sometimes', 'array'],
             'facilities.*.id'         => ['required_with:facilities', 'integer'],
-            'facilities.*.kondisi'    => ['nullable', 'string', 'in:Baik,Normal,Tidak Baik'],
+            'facilities.*.kondisi'    => ['nullable', 'string', 'in:Baik,Rusak,Tidak Ada'],
             'facilities.*.keterangan' => ['nullable', 'string', 'max:500'],
         ];
     }
@@ -42,10 +45,11 @@ class UpdateTfpAobGroundRequest extends FormRequest
     public function messages(): array
     {
         return [
+            'time_filled.regex'   => 'Waktu pengisian harus dalam format HH:MM.',
             'items.required'      => 'Minimal satu item harus disertakan.',
             'items.array'         => 'Items harus berupa array.',
             'items.*.id.required' => 'Setiap item wajib menyertakan id.',
-            'facilities.*.kondisi.in' => 'Kondisi harus salah satu dari: Baik, Normal, Tidak Baik.',
+            'facilities.*.kondisi.in' => 'Kondisi harus salah satu dari: Baik, Rusak, Tidak Ada.',
         ];
     }
 }
