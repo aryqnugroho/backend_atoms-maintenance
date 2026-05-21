@@ -49,7 +49,12 @@ class ReportingPersonSelectorService
             ->whereIn('role', self::REPAIRER_ROLES);
 
         if (!empty($division)) {
-            $q->where('division', $division);
+            // Match by explicit division column OR by role containing the division name
+            // (e.g. role = 'Supervisor TFP' should match division filter 'TFP')
+            $q->where(function ($query) use ($division) {
+                $query->where('division', $division)
+                      ->orWhere('role', 'LIKE', '%' . $division . '%');
+            });
         }
 
         if (!empty($search)) {
