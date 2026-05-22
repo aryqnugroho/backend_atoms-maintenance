@@ -51,9 +51,10 @@ Route::prefix('v1')->group(function () {
         Route::post('/auth/logout', [AuthController::class, 'logout']);
 
         // ─── Dashboard helpers ─────────────────────────────────
-        // Read-only roll-up powering the welcome modal + Pengingat Pengecekan
-        // Harian card (per-form has_record + WO summary per shift).
-        Route::get('/dashboard/shift-checklist', [\App\Http\Controllers\Api\V1\DashboardController::class, 'shiftChecklist']);
+        // Read-only roll-ups powering the dashboard widgets (welcome modal,
+        // Pengingat Pengecekan Harian card, Ringkasan Logbook card).
+        Route::get('/dashboard/shift-checklist',  [\App\Http\Controllers\Api\V1\DashboardController::class, 'shiftChecklist']);
+        Route::get('/dashboard/logbook-summary', [\App\Http\Controllers\Api\V1\DashboardController::class, 'logbookSummary']);
 
         // ─── Work Orders ───────────────────────────────────────
         // All authenticated users can read (Teknisi visibility filtered in service)
