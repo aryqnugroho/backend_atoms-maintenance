@@ -17,7 +17,6 @@ use App\Models\Cnsd\CnsdRecorderMeterRecord;
 use App\Models\Cnsd\CnsdTdmeMeterRecord;
 use App\Models\Cnsd\CnsdTransmitterMeterRecord;
 use App\Models\Tfp\TfpAobGroundRecord;
-use App\Models\Tfp\TfpAobLt12Record;
 use App\Models\WorkOrder\WorkOrder;
 use App\Traits\ApiResponse;
 use Carbon\Carbon;
@@ -53,7 +52,6 @@ class DashboardController extends Controller
         // ─── Wajib (every shift) ─────────────────────────────────────
         ['cnsd-readiness',  'CNSD', 'wajib', null, 'Kesiapan Peralatan CNSD',              '/cnsd/readiness',   CnsdReadinessRecord::class],
         ['tfp-aob-ground',  'TFP',  'wajib', null, 'Performance Check AOB Lantai Ground', '/tfp/aob-ground',   TfpAobGroundRecord::class],
-        ['tfp-aob-lt12',    'TFP',  'wajib', null, 'Performance Check AOB Lantai 1 & 2',  '/tfp/aob-lt12',     TfpAobLt12Record::class],
 
         // ─── Pagi (CNSD meter readings) ──────────────────────────────
         ['cnsd-localizer',   'CNSD', 'shift', 'pagi', 'Localizer',   '/cnsd/localizer-meter',   CnsdLocalizerMeterRecord::class],
