@@ -10,6 +10,7 @@ use App\Http\Requests\Tfp\SaveTfpAobLt12StructureRequest;
 use App\Http\Requests\Tfp\SignTfpAobLt12Request;
 use App\Http\Requests\Tfp\UpdateTfpAobLt12Request;
 use App\Models\Tfp\TfpAobLt12Record;
+use App\Services\Tfp\TfpActivityLogger;
 use App\Services\Tfp\TfpAobLt12Service;
 use App\Services\Tfp\TfpAobLt12Template;
 use App\Traits\ApiResponse;
@@ -25,6 +26,7 @@ class TfpAobLt12Controller extends Controller
 
     public function __construct(
         protected TfpAobLt12Service $service,
+        protected TfpActivityLogger $activityLogger,
     ) {}
 
     public function index(Request $request): JsonResponse
@@ -65,6 +67,15 @@ class TfpAobLt12Controller extends Controller
         } catch (RuntimeException $e) {
             return $this->error($e->getMessage(), null, 422);
         }
+
+        try {
+            $this->activityLogger->appendLogbookNote(
+                'Performance Check AOB Lantai 1 & 2',
+                $record->date->format('Y-m-d'),
+                $record->shift_type,
+                $user,
+            );
+        } catch (\Throwable) { /* non-fatal */ }
 
         return $this->success($this->detailRecord($record), 'TFP AOB Lantai 1 & 2 record created successfully', 201);
     }

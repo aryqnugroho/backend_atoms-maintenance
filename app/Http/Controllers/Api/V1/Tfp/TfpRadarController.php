@@ -10,6 +10,7 @@ use App\Http\Requests\Tfp\SaveTfpRadarStructureRequest;
 use App\Http\Requests\Tfp\SignTfpRadarRequest;
 use App\Http\Requests\Tfp\UpdateTfpRadarRequest;
 use App\Models\Tfp\TfpRadarRecord;
+use App\Services\Tfp\TfpActivityLogger;
 use App\Services\Tfp\TfpRadarService;
 use App\Services\Tfp\TfpRadarTemplate;
 use App\Traits\ApiResponse;
@@ -23,7 +24,10 @@ class TfpRadarController extends Controller
 {
     use ApiResponse;
 
-    public function __construct(protected TfpRadarService $service) {}
+    public function __construct(
+        protected TfpRadarService $service,
+        protected TfpActivityLogger $activityLogger,
+    ) {}
 
     public function index(Request $request): JsonResponse
     {
@@ -58,6 +62,16 @@ class TfpRadarController extends Controller
         } catch (RuntimeException $e) {
             return $this->error($e->getMessage(), null, 422);
         }
+
+        try {
+            $this->activityLogger->appendLogbookNote(
+                'Performance Check Gedung Radar',
+                $record->date->format('Y-m-d'),
+                $record->shift_type,
+                $user,
+            );
+        } catch (\Throwable) { /* non-fatal */ }
+
         return $this->success($this->detailRecord($record), 'TFP Radar record created successfully', 201);
     }
 

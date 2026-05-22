@@ -10,6 +10,7 @@ use App\Http\Requests\Tfp\SaveTfpTowerStructureRequest;
 use App\Http\Requests\Tfp\SignTfpTowerRequest;
 use App\Http\Requests\Tfp\UpdateTfpTowerRequest;
 use App\Models\Tfp\TfpTowerRecord;
+use App\Services\Tfp\TfpActivityLogger;
 use App\Services\Tfp\TfpTowerService;
 use App\Services\Tfp\TfpTowerTemplate;
 use App\Traits\ApiResponse;
@@ -23,7 +24,10 @@ class TfpTowerController extends Controller
 {
     use ApiResponse;
 
-    public function __construct(protected TfpTowerService $service) {}
+    public function __construct(
+        protected TfpTowerService $service,
+        protected TfpActivityLogger $activityLogger,
+    ) {}
 
     public function index(Request $request): JsonResponse
     {
@@ -58,6 +62,16 @@ class TfpTowerController extends Controller
         } catch (RuntimeException $e) {
             return $this->error($e->getMessage(), null, 422);
         }
+
+        try {
+            $this->activityLogger->appendLogbookNote(
+                'Performance Check Gedung Tower',
+                $record->date->format('Y-m-d'),
+                $record->shift_type,
+                $user,
+            );
+        } catch (\Throwable) { /* non-fatal */ }
+
         return $this->success($this->detailRecord($record), 'TFP Tower record created successfully', 201);
     }
 

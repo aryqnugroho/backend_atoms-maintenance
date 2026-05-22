@@ -10,6 +10,7 @@ use App\Http\Requests\Tfp\SaveTfpLocalizerStructureRequest;
 use App\Http\Requests\Tfp\SignTfpLocalizerRequest;
 use App\Http\Requests\Tfp\UpdateTfpLocalizerRequest;
 use App\Models\Tfp\TfpLocalizerRecord;
+use App\Services\Tfp\TfpActivityLogger;
 use App\Services\Tfp\TfpLocalizerService;
 use App\Services\Tfp\TfpLocalizerTemplate;
 use App\Traits\ApiResponse;
@@ -23,7 +24,10 @@ class TfpLocalizerController extends Controller
 {
     use ApiResponse;
 
-    public function __construct(protected TfpLocalizerService $service) {}
+    public function __construct(
+        protected TfpLocalizerService $service,
+        protected TfpActivityLogger $activityLogger,
+    ) {}
 
     public function index(Request $request): JsonResponse
     {
@@ -58,6 +62,16 @@ class TfpLocalizerController extends Controller
         } catch (RuntimeException $e) {
             return $this->error($e->getMessage(), null, 422);
         }
+
+        try {
+            $this->activityLogger->appendLogbookNote(
+                'Performance Check Gedung Localizer',
+                $record->date->format('Y-m-d'),
+                $record->shift_type,
+                $user,
+            );
+        } catch (\Throwable) { /* non-fatal */ }
+
         return $this->success($this->detailRecord($record), 'TFP Localizer record created successfully', 201);
     }
 

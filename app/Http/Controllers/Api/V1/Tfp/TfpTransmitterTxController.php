@@ -10,6 +10,7 @@ use App\Http\Requests\Tfp\SaveTfpTransmitterTxStructureRequest;
 use App\Http\Requests\Tfp\SignTfpTransmitterTxRequest;
 use App\Http\Requests\Tfp\UpdateTfpTransmitterTxRequest;
 use App\Models\Tfp\TfpTransmitterTxRecord;
+use App\Services\Tfp\TfpActivityLogger;
 use App\Services\Tfp\TfpTransmitterTxService;
 use App\Services\Tfp\TfpTransmitterTxTemplate;
 use App\Traits\ApiResponse;
@@ -23,7 +24,10 @@ class TfpTransmitterTxController extends Controller
 {
     use ApiResponse;
 
-    public function __construct(protected TfpTransmitterTxService $service) {}
+    public function __construct(
+        protected TfpTransmitterTxService $service,
+        protected TfpActivityLogger $activityLogger,
+    ) {}
 
     public function index(Request $request): JsonResponse
     {
@@ -58,6 +62,16 @@ class TfpTransmitterTxController extends Controller
         } catch (RuntimeException $e) {
             return $this->error($e->getMessage(), null, 422);
         }
+
+        try {
+            $this->activityLogger->appendLogbookNote(
+                'Performance Check Gedung Transmitter',
+                $record->date->format('Y-m-d'),
+                $record->shift_type,
+                $user,
+            );
+        } catch (\Throwable) { /* non-fatal */ }
+
         return $this->success($this->detailRecord($record), 'TFP Transmitter TX record created successfully', 201);
     }
 

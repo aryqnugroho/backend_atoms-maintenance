@@ -10,6 +10,7 @@ use App\Http\Requests\Tfp\SaveTfpGlidepathStructureRequest;
 use App\Http\Requests\Tfp\SignTfpGlidepathRequest;
 use App\Http\Requests\Tfp\UpdateTfpGlidepathRequest;
 use App\Models\Tfp\TfpGlidepathRecord;
+use App\Services\Tfp\TfpActivityLogger;
 use App\Services\Tfp\TfpGlidepathService;
 use App\Services\Tfp\TfpGlidepathTemplate;
 use App\Traits\ApiResponse;
@@ -23,7 +24,10 @@ class TfpGlidepathController extends Controller
 {
     use ApiResponse;
 
-    public function __construct(protected TfpGlidepathService $service) {}
+    public function __construct(
+        protected TfpGlidepathService $service,
+        protected TfpActivityLogger $activityLogger,
+    ) {}
 
     public function index(Request $request): JsonResponse
     {
@@ -58,6 +62,16 @@ class TfpGlidepathController extends Controller
         } catch (RuntimeException $e) {
             return $this->error($e->getMessage(), null, 422);
         }
+
+        try {
+            $this->activityLogger->appendLogbookNote(
+                'Performance Check Gedung Glide Path',
+                $record->date->format('Y-m-d'),
+                $record->shift_type,
+                $user,
+            );
+        } catch (\Throwable) { /* non-fatal */ }
+
         return $this->success($this->detailRecord($record), 'TFP Glide Path record created successfully', 201);
     }
 

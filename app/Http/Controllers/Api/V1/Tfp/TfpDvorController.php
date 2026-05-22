@@ -10,6 +10,7 @@ use App\Http\Requests\Tfp\SaveTfpDvorStructureRequest;
 use App\Http\Requests\Tfp\SignTfpDvorRequest;
 use App\Http\Requests\Tfp\UpdateTfpDvorRequest;
 use App\Models\Tfp\TfpDvorRecord;
+use App\Services\Tfp\TfpActivityLogger;
 use App\Services\Tfp\TfpDvorService;
 use App\Services\Tfp\TfpDvorTemplate;
 use App\Traits\ApiResponse;
@@ -23,7 +24,10 @@ class TfpDvorController extends Controller
 {
     use ApiResponse;
 
-    public function __construct(protected TfpDvorService $service) {}
+    public function __construct(
+        protected TfpDvorService $service,
+        protected TfpActivityLogger $activityLogger,
+    ) {}
 
     public function index(Request $request): JsonResponse
     {
@@ -58,6 +62,16 @@ class TfpDvorController extends Controller
         } catch (RuntimeException $e) {
             return $this->error($e->getMessage(), null, 422);
         }
+
+        try {
+            $this->activityLogger->appendLogbookNote(
+                'Performance Check Gedung DVOR',
+                $record->date->format('Y-m-d'),
+                $record->shift_type,
+                $user,
+            );
+        } catch (\Throwable) { /* non-fatal */ }
+
         return $this->success($this->detailRecord($record), 'TFP DVOR record created successfully', 201);
     }
 

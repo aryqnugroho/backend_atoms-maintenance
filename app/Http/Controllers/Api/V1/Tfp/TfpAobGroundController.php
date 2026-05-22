@@ -10,6 +10,7 @@ use App\Http\Requests\Tfp\SaveTfpAobGroundStructureRequest;
 use App\Http\Requests\Tfp\SignTfpAobGroundRequest;
 use App\Http\Requests\Tfp\UpdateTfpAobGroundRequest;
 use App\Models\Tfp\TfpAobGroundRecord;
+use App\Services\Tfp\TfpActivityLogger;
 use App\Services\Tfp\TfpAobGroundService;
 use App\Services\Tfp\TfpAobGroundTemplate;
 use App\Traits\ApiResponse;
@@ -25,6 +26,7 @@ class TfpAobGroundController extends Controller
 
     public function __construct(
         protected TfpAobGroundService $service,
+        protected TfpActivityLogger $activityLogger,
     ) {}
 
     /**
@@ -82,6 +84,15 @@ class TfpAobGroundController extends Controller
         } catch (RuntimeException $e) {
             return $this->error($e->getMessage(), null, 422);
         }
+
+        try {
+            $this->activityLogger->appendLogbookNote(
+                'Performance Check AOB Lantai Ground',
+                $record->date->format('Y-m-d'),
+                $record->shift_type,
+                $user,
+            );
+        } catch (\Throwable) { /* non-fatal */ }
 
         return $this->success($this->detailRecord($record), 'TFP AOB Ground record created successfully', 201);
     }
