@@ -50,6 +50,11 @@ Route::prefix('v1')->group(function () {
         Route::get('/auth/me', [AuthController::class, 'me']);
         Route::post('/auth/logout', [AuthController::class, 'logout']);
 
+        // ─── Dashboard helpers ─────────────────────────────────
+        // Read-only roll-up powering the welcome modal + Pengingat Pengecekan
+        // Harian card (per-form has_record + WO summary per shift).
+        Route::get('/dashboard/shift-checklist', [\App\Http\Controllers\Api\V1\DashboardController::class, 'shiftChecklist']);
+
         // ─── Work Orders ───────────────────────────────────────
         // All authenticated users can read (Teknisi visibility filtered in service)
         Route::get('/work-orders', [WorkOrderController::class, 'index']);
