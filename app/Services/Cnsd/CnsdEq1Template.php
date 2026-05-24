@@ -13,9 +13,9 @@ namespace App\Services\Cnsd;
  * Section column headers are tracked via columns_label_1 / columns_label_2
  * so the frontend can render the right header per section without hardcoding.
  *
- * TODO: when additional CNSD form types are introduced (RADAR, RECORDER,
- *       AMSC etc.), add a parallel CnsdRadar001Template and route through a
- *       CnsdReadinessTemplateRegistry keyed by form_type.
+ * Note: Additional CNSD form types (RADAR, RECORDER, AMSC, etc.) have since
+ * been implemented as separate templates (CnsdRadarMeterTemplate, etc.) with
+ * their own services. No shared registry — each module owns its own template.
  */
 class CnsdEq1Template
 {

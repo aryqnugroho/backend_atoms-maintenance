@@ -1,0 +1,36 @@
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+return new class extends Migration {
+    public function up(): void
+    {
+        Schema::create('cnsd_asmgcs_meter_technicians', function (Blueprint $table) {
+            $table->id();
+            $table->unsignedBigInteger('asmgcs_meter_record_id');
+            $table->unsignedBigInteger('technician_id')->nullable();
+            $table->string('technician_name');
+            $table->longText('technician_signature')->nullable();
+            $table->unsignedBigInteger('technician_signed_by')->nullable();
+            $table->timestamp('technician_signed_at')->nullable();
+            $table->integer('sort_order')->default(0);
+            $table->timestamps();
+
+            $table->foreign('asmgcs_meter_record_id')
+                ->references('id')->on('cnsd_asmgcs_meter_records')->cascadeOnDelete();
+            $table->foreign('technician_id')
+                ->references('id')->on('local_users')->nullOnDelete();
+            $table->foreign('technician_signed_by')
+                ->references('id')->on('local_users')->nullOnDelete();
+
+            $table->index('asmgcs_meter_record_id');
+        });
+    }
+
+    public function down(): void
+    {
+        Schema::dropIfExists('cnsd_asmgcs_meter_technicians');
+    }
+};
