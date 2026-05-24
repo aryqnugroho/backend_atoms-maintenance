@@ -13,6 +13,7 @@ use App\Services\GroundCheck\GroundCheckVhfService;
 use App\Services\GroundCheck\GroundCheckVhfTemplate;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 
 class GroundCheckVhfController extends Controller
 {
@@ -105,7 +106,7 @@ class GroundCheckVhfController extends Controller
      */
     public function store(CreateGroundCheckVhfRequest $request): JsonResponse
     {
-        $user = $request->attributes->get('auth_user');
+        $user = Auth::user();
 
         try {
             $record = $this->service->createRecord($request->validated(), $user);
@@ -203,7 +204,7 @@ class GroundCheckVhfController extends Controller
             ], 404);
         }
 
-        $user = $request->attributes->get('auth_user');
+        $user = Auth::user();
 
         try {
             $signed = $this->service->signRecord(
@@ -370,7 +371,7 @@ class GroundCheckVhfController extends Controller
             'caption' => ['nullable', 'string', 'max:255'],
         ]);
 
-        $user = $request->attributes->get('auth_user');
+        $user = Auth::user();
 
         try {
             $this->service->addPhoto($record, $validated['photo'], $validated['caption'] ?? null, $user);

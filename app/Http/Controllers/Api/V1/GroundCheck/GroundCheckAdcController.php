@@ -12,6 +12,7 @@ use App\Services\GroundCheck\GroundCheckAdcService;
 use App\Services\GroundCheck\GroundCheckAdcTemplate;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 
 class GroundCheckAdcController extends Controller
 {
@@ -103,7 +104,7 @@ class GroundCheckAdcController extends Controller
      */
     public function store(CreateGroundCheckAdcRequest $request): JsonResponse
     {
-        $user = $request->attributes->get('auth_user');
+        $user = Auth::user();
 
         try {
             $record = $this->service->createRecord($request->validated(), $user);
@@ -201,7 +202,7 @@ class GroundCheckAdcController extends Controller
             ], 404);
         }
 
-        $user = $request->attributes->get('auth_user');
+        $user = Auth::user();
 
         try {
             $signed = $this->service->signRecord(
@@ -355,7 +356,7 @@ class GroundCheckAdcController extends Controller
             'caption' => ['nullable', 'string', 'max:255'],
         ]);
 
-        $user = $request->attributes->get('auth_user');
+        $user = Auth::user();
 
         try {
             $this->service->addPhoto($record, $validated['photo'], $validated['caption'] ?? null, $user);

@@ -13,6 +13,7 @@ use App\Services\GroundCheck\GroundCheckGpService;
 use App\Services\GroundCheck\GroundCheckGpTemplate;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 
 class GroundCheckGpController extends Controller
 {
@@ -93,7 +94,7 @@ class GroundCheckGpController extends Controller
 
     public function store(CreateGroundCheckGpRequest $request): JsonResponse
     {
-        $user = $request->attributes->get('auth_user');
+        $user = Auth::user();
 
         try {
             $record = $this->service->createRecord($request->validated(), $user);
@@ -182,7 +183,7 @@ class GroundCheckGpController extends Controller
             ], 404);
         }
 
-        $user = $request->attributes->get('auth_user');
+        $user = Auth::user();
 
         try {
             $signed = $this->service->signRecord(
@@ -339,7 +340,7 @@ class GroundCheckGpController extends Controller
             'caption' => ['nullable', 'string', 'max:255'],
         ]);
 
-        $user = $request->attributes->get('auth_user');
+        $user = Auth::user();
 
         try {
             $this->service->addPhoto($record, $validated['photo'], $validated['caption'] ?? null, $user);

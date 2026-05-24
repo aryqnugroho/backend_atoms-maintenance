@@ -14,6 +14,7 @@ use App\Services\GroundCheck\GroundCheckDvorService;
 use App\Services\GroundCheck\GroundCheckDvorTemplate;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 
 class GroundCheckDvorController extends Controller
 {
@@ -95,7 +96,7 @@ class GroundCheckDvorController extends Controller
 
     public function store(CreateGroundCheckDvorRequest $request): JsonResponse
     {
-        $user = $request->attributes->get('auth_user');
+        $user = Auth::user();
 
         try {
             $record = $this->service->createRecord($request->validated(), $user);
@@ -184,7 +185,7 @@ class GroundCheckDvorController extends Controller
             ], 404);
         }
 
-        $user = $request->attributes->get('auth_user');
+        $user = Auth::user();
 
         try {
             $signed = $this->service->signRecord(
@@ -357,7 +358,7 @@ class GroundCheckDvorController extends Controller
             'caption' => ['nullable', 'string', 'max:255'],
         ]);
 
-        $user = $request->attributes->get('auth_user');
+        $user = Auth::user();
 
         try {
             $this->service->addPhoto($record, $validated['photo'], $validated['caption'] ?? null, $user);

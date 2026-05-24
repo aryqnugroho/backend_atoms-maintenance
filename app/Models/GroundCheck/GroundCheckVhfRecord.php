@@ -50,6 +50,28 @@ class GroundCheckVhfRecord extends Model
         'supervisor_signed_at' => 'datetime',
     ];
 
+    /**
+     * Override HasSignature default map — Ground Check uses `manager_*`
+     * columns, not `mt_*`. See GroundCheckAdcRecord for the full rationale.
+     */
+    public function signatureRoleMap(): array
+    {
+        return [
+            'manager' => [
+                'name'      => 'manager_name',
+                'signature' => 'manager_signature',
+                'signed_at' => 'manager_signed_at',
+                'signed_by' => 'manager_signed_by',
+            ],
+            'supervisor' => [
+                'name'      => 'supervisor_name',
+                'signature' => 'supervisor_signature',
+                'signed_at' => 'supervisor_signed_at',
+                'signed_by' => 'supervisor_signed_by',
+            ],
+        ];
+    }
+
     // ─── Relationships ─────────────────────────────────────
 
     public function technicians(): HasMany
