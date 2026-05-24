@@ -17,11 +17,11 @@ class WorkOrderUpdateRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'description' => ['sometimes', 'string', 'min:10'],
+            'description' => ['sometimes', 'string'],
             'start_time' => ['nullable', 'date_format:H:i'],
             'end_time' => ['nullable', 'date_format:H:i'],
             'completion_status' => ['nullable', 'string', Rule::in(WorkOrder::COMPLETION_STATUSES)],
-            'notes_kendala' => ['nullable', 'string'],
+            'notes_kendala' => ['nullable', 'string', 'required_if:completion_status,belum_selesai_dilanjut,tidak_bisa'],
             'notes_usulan' => ['nullable', 'string'],
             'notes_pemberi_tugas' => ['nullable', 'string'],
 
@@ -34,8 +34,8 @@ class WorkOrderUpdateRequest extends FormRequest
     public function messages(): array
     {
         return [
-            'description.min' => 'Deskripsi minimal 10 karakter.',
             'output_types.min' => 'Minimal satu output harus dipilih.',
+            'notes_kendala.required_if' => 'Catatan/Kendala wajib diisi jika status belum selesai atau tidak dapat diselesaikan.',
         ];
     }
 }

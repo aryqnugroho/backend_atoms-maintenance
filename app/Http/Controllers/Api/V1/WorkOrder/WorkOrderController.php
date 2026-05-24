@@ -84,10 +84,14 @@ class WorkOrderController extends Controller
     {
         $user = Auth::user();
 
-        $workOrder = $this->workOrderService->createWorkOrder(
-            $request->validated(),
-            $user
-        );
+        try {
+            $workOrder = $this->workOrderService->createWorkOrder(
+                $request->validated(),
+                $user
+            );
+        } catch (RuntimeException $exception) {
+            return $this->error($exception->getMessage(), null, 409);
+        }
 
         // Send notifications
         $this->notificationService->notifyWorkOrderCreated($workOrder);
@@ -307,6 +311,7 @@ class WorkOrderController extends Controller
             'creator' => $wo->creator ? [
                 'id' => $wo->creator->id,
                 'name' => $wo->creator->name,
+                'role' => $wo->creator->role,
             ] : null,
             'personnel' => $wo->personnel->map(function ($p) {
                 return [

@@ -18,22 +18,23 @@ class WorkOrderPolicy
 
     /**
      * Determine if the user can view a specific work order.
-     * Admin, Manager, Supervisor: can view any WO.
-     * Teknisi: only their assigned WOs.
+     * Admin, Manager, General Manager, Supervisor: any WO (full visibility).
+     * Teknisi: any WO IN THEIR DIVISION (CNSD teknisi sees CNSD WOs, etc.).
+     *   Edit/feedback is still gated to assigned-only by `update`.
      */
     public function view(LocalUser $user, WorkOrder $workOrder): bool
     {
-        if ($user->isAdmin() || $user->isManager()) {
+        if ($user->isAdmin() || $user->isManager() || $user->isGeneralManager()) {
             return true;
         }
 
         if ($user->isSupervisor()) {
-            return true; // Supervisors can view all WOs
+            return true; // Supervisors are MT-equivalent: full cross-division view
         }
 
-        // Teknisi: only assigned WOs
         if ($user->isTeknisi()) {
-            return $this->isAssignedToWorkOrder($user, $workOrder);
+            $division = $user->getRoleDivision();
+            return $division !== null && $workOrder->division === $division;
         }
 
         return false;
@@ -41,29 +42,35 @@ class WorkOrderPolicy
 
     /**
      * Determine if the user can create work orders.
-     * Admin, Manager, Supervisors can create.
+     * Admin, Manager, General Manager (gm_directive only), Supervisors can create.
+     * Teknisi cannot create.
      */
     public function create(LocalUser $user): bool
     {
-        return $user->isAdmin() || $user->isManager() || $user->isSupervisor();
+        return $user->isAdmin()
+            || $user->isManager()
+            || $user->isGeneralManager()
+            || $user->isSupervisor();
     }
 
     /**
      * Determine if the user can update a specific work order.
-     * Admin: always.
-     * Manager: always.
-     * Supervisor: only WOs in their division.
-     * Teknisi: only their assigned WOs (can update status, notes, times).
+     * Admin / Manager Teknik / Supervisor: full access (supervisors are
+     *   MT-equivalent across divisions).
+     * General Manager: only their own gm_directive WOs while still ongoing.
+     * Teknisi: only WOs they are assigned to — feedback workflow remains
+     *   personal even though their list view is widened to the whole division.
      */
     public function update(LocalUser $user, WorkOrder $workOrder): bool
     {
-        if ($user->isAdmin() || $user->isManager()) {
+        if ($user->isAdmin() || $user->isManager() || $user->isSupervisor()) {
             return true;
         }
 
-        if ($user->isSupervisor()) {
-            $userDivision = $user->getRoleDivision();
-            return !$userDivision || $workOrder->division === $userDivision;
+        if ($user->isGeneralManager()) {
+            return $workOrder->wo_type === 'gm_directive'
+                && $workOrder->created_by === $user->id
+                && $workOrder->status === 'ongoing';
         }
 
         if ($user->isTeknisi()) {
@@ -75,11 +82,22 @@ class WorkOrderPolicy
 
     /**
      * Determine if the user can delete a work order.
-     * Only Admin and Manager can delete.
+     * Admin / Manager Teknik / Supervisor: any WO.
+     * General Manager: only their own gm_directive WOs while still ongoing.
      */
     public function delete(LocalUser $user, WorkOrder $workOrder): bool
     {
-        return $user->isAdmin() || $user->isManager();
+        if ($user->isAdmin() || $user->isManager() || $user->isSupervisor()) {
+            return true;
+        }
+
+        if ($user->isGeneralManager()) {
+            return $workOrder->wo_type === 'gm_directive'
+                && $workOrder->created_by === $user->id
+                && $workOrder->status === 'ongoing';
+        }
+
+        return false;
     }
 
     /**

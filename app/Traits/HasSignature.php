@@ -154,13 +154,28 @@ trait HasSignature
 
     /**
      * Recalculate signature-derived status.
+     *
+     * Rules:
+     * - completed: ALL required signatures filled AND completion_status = 'selesai'
+     * - on_hold: shift has ended AND (no completion_status OR completion_status != 'selesai')
+     * - ongoing: shift still running
      */
     public function recalculateStatus(): string
     {
-        if ($this->isComplete()) {
+        // Check if model has completion_status (Work Order specific)
+        $completionStatus = null;
+        if ($this->hasAttributeColumn('completion_status')) {
+            $completionStatus = $this->completion_status ?? null;
+        }
+
+        $allSigned = $this->isComplete();
+
+        // Completed: all signatures + feedback is "selesai"
+        if ($allSigned && $completionStatus === 'selesai') {
             return 'completed';
         }
 
+        // On hold: shift ended (regardless of signatures)
         if (method_exists($this, 'isShiftEnded') && $this->isShiftEnded()) {
             return 'on_hold';
         }

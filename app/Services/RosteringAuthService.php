@@ -94,7 +94,9 @@ class RosteringAuthService
      */
     public function buildTransientUser(array $rosteringUser): \App\Models\LocalUser
     {
-        $role     = $this->mapRole($rosteringUser['role'] ?? '');
+        $grade    = (int) ($rosteringUser['grade'] ?? 0);
+        $empType  = $rosteringUser['employee']['employee_type'] ?? '';
+        $role     = $this->mapRole($rosteringUser['role'] ?? '', $grade, $empType);
         $division = $this->mapDivision($rosteringUser['role'] ?? '', $rosteringUser['employee'] ?? null);
 
         /** @var \App\Models\LocalUser $user */
@@ -122,19 +124,25 @@ class RosteringAuthService
      * Map atoms-rostering role strings to atoms-maintenance role strings.
      *
      * Rostering roles:  Admin | Cns | Support | Manager Teknik | General Manager
-     * Maintenance roles: Admin | Teknisi CNSD | Supervisor CNSD | Teknisi TFP | Supervisor TFP | Manager Teknik
+     * Maintenance roles: Admin | Teknisi CNSD | Supervisor CNSD | Teknisi TFP | Supervisor TFP | Manager Teknik | General Manager
      *
-     * Supervisor distinction (Cns/Support with grade >= 13) is resolved here.
+     * Supervisor distinction: grade >= 13 = supervisor.
      */
-    private function mapRole(string $rosteringRole): string
+    private function mapRole(string $rosteringRole, int $grade = 0, string $employeeType = ''): string
     {
+        $isSupervisorGrade = $grade >= 13;
+
         return match ($rosteringRole) {
             'Admin'           => 'Admin',
             'Manager Teknik'  => 'Manager Teknik',
-            'General Manager' => 'Manager Teknik', // closest equivalent
-            'Cns'             => 'Teknisi CNSD',   // supervisor upgrade handled below
-            'Support'         => 'Teknisi TFP',    // supervisor upgrade handled below
-            default           => 'Teknisi CNSD',
+            'General Manager' => 'General Manager',
+            'Cns'             => $isSupervisorGrade ? 'Supervisor CNSD' : 'Teknisi CNSD',
+            'Support'         => $isSupervisorGrade ? 'Supervisor TFP' : 'Teknisi TFP',
+            default           => match ($employeeType) {
+                'CNS'     => $isSupervisorGrade ? 'Supervisor CNSD' : 'Teknisi CNSD',
+                'Support' => $isSupervisorGrade ? 'Supervisor TFP' : 'Teknisi TFP',
+                default   => 'Teknisi CNSD',
+            },
         };
     }
 

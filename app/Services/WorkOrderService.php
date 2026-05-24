@@ -21,7 +21,12 @@ class WorkOrderService
 
     /**
      * List work orders with filtering, sorting, and pagination.
-     * Teknisi users only see their own assigned WOs.
+     *
+     * Visibility rules:
+     *   - Admin, Manager Teknik, General Manager, Supervisor: see everything.
+     *   - Teknisi CNSD / Teknisi TFP: see every WO in their division
+     *     (CNSD or TFP) regardless of whether they're assigned. Updates/feedback
+     *     are still policy-gated (only their own assigned WOs are editable).
      */
     public function listWorkOrders(array $filters, LocalUser $user, int $perPage = 15): LengthAwarePaginator
     {
@@ -30,12 +35,17 @@ class WorkOrderService
             'outputs',
             'manager:id,name',
             'supervisor:id,name',
-            'creator:id,name',
+            'creator:id,name,role',
         ]);
 
-        // Teknisi can only see their own assigned WOs
+        // Teknisi: scoped to their division so they see the team's WOs, not
+        // only their own. Detail-page edit/feedback remains assignment-gated
+        // by WorkOrderPolicy::update.
         if ($user->isTeknisi()) {
-            $query->visibleToTeknisi($user->id);
+            $division = $user->getRoleDivision();
+            if ($division) {
+                $query->where('division', $division);
+            }
         }
 
         // Apply filters
@@ -81,7 +91,12 @@ class WorkOrderService
             $query->orderBy($sortBy, $sortDir === 'asc' ? 'asc' : 'desc');
         }
 
-        return $query->paginate($perPage);
+        $result = $query->paginate($perPage);
+
+        // Recalculate stale statuses on read (shift ended but still marked ongoing)
+        $this->recalculateStaleStatuses($result->items());
+
+        return $result;
     }
 
     /**
@@ -89,17 +104,23 @@ class WorkOrderService
      */
     public function getWorkOrder(int $id): ?WorkOrder
     {
-        return WorkOrder::with([
+        $wo = WorkOrder::with([
             'personnel.user:id,name,role',
             'outputs',
             'manager:id,name',
             'supervisor:id,name',
             'assignedTechnician:id,name',
-            'creator:id,name',
+            'creator:id,name,role',
             'mtSigner:id,name',
             'supervisorSigner:id,name',
             'technicianSigner:id,name',
         ])->find($id);
+
+        if ($wo) {
+            $this->recalculateStaleStatuses([$wo]);
+        }
+
+        return $wo;
     }
 
     /**
@@ -108,22 +129,29 @@ class WorkOrderService
     public function createWorkOrder(array $data, LocalUser $creator): WorkOrder
     {
         return DB::transaction(function () use ($data, $creator) {
+            $isGmDirective = ($data['wo_type'] ?? null) === 'gm_directive';
+
             // ── Step 1: translate every user-id field in the *incoming* payload
             //           from rostering_user_id to local_users.id. Frontend always
             //           sends rostering ids; backend stores local_users.id.
             $data = $this->mapPayloadRosteringIdsToLocal($data);
 
-            // ── Step 2: auto-fill manager/supervisor from rostering when omitted.
-            //           This step writes local_users.id directly (uses the resolver
-            //           internally), so it must run AFTER the payload translation
-            //           so the two passes don't double-map.
-            $data = $this->resolveShiftPersonnelFromRostering($data);
+            // ── Step 1.5: enforce one-per-shift-per-division for shift WOs,
+            //             and one-per-technician for personal WOs.
+            //             Must run AFTER ID mapping so assigned_technician_id is local.
+            //             GM directives are not deduped (a GM may issue multiple).
+            if (!$isGmDirective) {
+                $this->assertNoDuplicate($data);
+            }
 
-            // ── Step 3: for shift WOs, auto-fill personnel from rostering when
-            //           the frontend didn't send any (e.g., division CNSD on a
-            //           shift where the user couldn't see the personnel list).
-            //           Backend remains the source of truth for shift personnel.
-            $data = $this->autoFillShiftPersonnelFromRostering($data);
+            // ── Step 2 & 3: auto-fill manager/supervisor + shift personnel from
+            //              rostering. SKIPPED for GM directives — the GM picks
+            //              MT (required) and Supervisor (optional) explicitly,
+            //              and no technicians are assigned.
+            if (!$isGmDirective) {
+                $data = $this->resolveShiftPersonnelFromRostering($data);
+                $data = $this->autoFillShiftPersonnelFromRostering($data);
+            }
 
             // Generate WO number
             $woNumber = $this->generateWoNumber($data['division']);
@@ -134,7 +162,9 @@ class WorkOrderService
             $hasSupervisor = array_key_exists('has_supervisor', $data)
                 ? (bool) $data['has_supervisor']
                 : $supervisor !== null;
-            $selectedTechnician = $this->selectTechnicianForShift($data);
+
+            // GM directives never carry a technician slot.
+            $selectedTechnician = $isGmDirective ? null : $this->selectTechnicianForShift($data);
 
             $workOrder = WorkOrder::create([
                 'wo_number' => $woNumber,
@@ -163,13 +193,13 @@ class WorkOrderService
                 'created_by' => $creator->id,
             ]);
 
-            // Sync personnel
-            if (!empty($data['personnel'])) {
+            // Sync personnel (GM directives have none).
+            if (!$isGmDirective && !empty($data['personnel'])) {
                 $this->syncPersonnel($workOrder, $data['personnel']);
             }
 
-            // Sync output types
-            if (!empty($data['output_types'])) {
+            // Sync output types (GM directives have none).
+            if (!$isGmDirective && !empty($data['output_types'])) {
                 $this->syncOutputs($workOrder, $data['output_types'], $data['output_other'] ?? null);
             }
 
@@ -180,7 +210,7 @@ class WorkOrderService
                 'manager:id,name',
                 'supervisor:id,name',
                 'assignedTechnician:id,name',
-                'creator:id,name',
+                'creator:id,name,role',
                 'mtSigner:id,name',
                 'supervisorSigner:id,name',
                 'technicianSigner:id,name',
@@ -351,6 +381,11 @@ class WorkOrderService
             }
             $workOrder->save();
 
+            // ── Auto-add logbook note when WO transitions to on_hold ──────────
+            if ($workOrder->status === 'on_hold' && $oldStatus !== 'on_hold') {
+                $this->addLogbookNoteForOnHold($workOrder);
+            }
+
             // Reload relationships
             $workOrder->load([
                 'personnel.user:id,name,role',
@@ -358,7 +393,7 @@ class WorkOrderService
                 'manager:id,name',
                 'supervisor:id,name',
                 'assignedTechnician:id,name',
-                'creator:id,name',
+                'creator:id,name,role',
                 'mtSigner:id,name',
                 'supervisorSigner:id,name',
                 'technicianSigner:id,name',
@@ -366,6 +401,81 @@ class WorkOrderService
 
             return $workOrder;
         });
+    }
+
+    /**
+     * When a Work Order transitions to on_hold, auto-add a note to the
+     * logbook for that date+shift. Uses the correct logbook based on division:
+     * - CNSD → LogbookCnsd
+     * - TFP  → LogbookTfp
+     *
+     * Time is set to the shift end time (not current time) for chronological order.
+     * If no logbook exists for that date, one is auto-created.
+     */
+    private function addLogbookNoteForOnHold(WorkOrder $workOrder): void
+    {
+        try {
+            $date = $workOrder->shift_date->format('Y-m-d');
+            $shift = $workOrder->shift_type;
+            $division = $workOrder->division;
+
+            // Determine shift end time for the note timestamp
+            $shiftEndTimes = [
+                'pagi'  => '13:00',
+                'siang' => '19:00',
+                'malam' => '07:00',
+            ];
+            $noteTime = $shiftEndTimes[$shift] ?? now()->format('H:i');
+
+            // Build the note activity text
+            $completionLabel = match ($workOrder->completion_status) {
+                'belum_selesai_dilanjut' => 'Belum Selesai (Dilanjutkan)',
+                'tidak_bisa' => 'Tidak Dapat Diselesaikan',
+                default => 'On Hold',
+            };
+
+            $activity = "[WO {$workOrder->wo_number}] {$completionLabel}";
+            if ($workOrder->notes_kendala) {
+                $activity .= " — Kendala: {$workOrder->notes_kendala}";
+            }
+
+            if ($division === 'CNSD') {
+                $this->addNoteToCnsdLogbook($date, $shift, $noteTime, $activity);
+            } else {
+                $this->addNoteToTfpLogbook($date, $shift, $noteTime, $activity);
+            }
+        } catch (\Throwable $e) {
+            // Non-critical — log and continue. WO update should not fail
+            // because logbook integration had an issue.
+            \Illuminate\Support\Facades\Log::info(
+                'WorkOrderService: logbook note for on_hold skipped',
+                ['wo_id' => $workOrder->id, 'error' => $e->getMessage()]
+            );
+        }
+    }
+
+    private function addNoteToCnsdLogbook(string $date, string $shift, string $time, string $activity): void
+    {
+        $logbookService = app(\App\Services\Logbook\LogbookCnsdService::class);
+        $logbook = \App\Models\Logbook\LogbookCnsd::whereDate('date', $date)->first();
+
+        if (!$logbook) {
+            $logbook = $logbookService->createLogbook($date);
+        }
+
+        $logbookService->addNote($logbook, $shift, $time, $activity, null);
+    }
+
+    private function addNoteToTfpLogbook(string $date, string $shift, string $time, string $activity): void
+    {
+        $logbookService = app(\App\Services\Logbook\LogbookTfpService::class);
+        $logbook = \App\Models\Logbook\LogbookTfp::whereDate('date', $date)->first();
+
+        if (!$logbook) {
+            $logbook = $logbookService->createLogbook($date);
+        }
+
+        $logbookService->addNote($logbook, $shift, $time, $activity, null);
     }
 
     /**
@@ -405,6 +515,96 @@ class WorkOrderService
     public function deleteWorkOrder(WorkOrder $workOrder): bool
     {
         return $workOrder->delete();
+    }
+
+    /**
+     * Recalculate status for work orders that are still 'ongoing' but whose
+     * shift has already ended. Persists the change and triggers logbook note
+     * if transitioning to on_hold.
+     *
+     * Called lazily on read (list/detail) so status stays accurate without
+     * needing a cron job.
+     *
+     * @param  iterable<WorkOrder>  $workOrders
+     */
+    private function recalculateStaleStatuses(iterable $workOrders): void
+    {
+        foreach ($workOrders as $wo) {
+            if ($wo->status !== 'ongoing') {
+                continue;
+            }
+
+            $newStatus = $wo->recalculateStatus();
+            if ($newStatus !== 'ongoing' && $newStatus !== $wo->status) {
+                $oldStatus = $wo->status;
+                $wo->status = $newStatus;
+                $wo->save();
+
+                // Trigger logbook note on transition to on_hold
+                if ($newStatus === 'on_hold') {
+                    $this->addLogbookNoteForOnHold($wo);
+                }
+            }
+        }
+    }
+
+    /**
+     * Enforce work order creation limits per shift:
+     *
+     * - WO Shift: max 1 per shift_date + shift_type + division.
+     *   (CNSD gets 1 shift WO, TFP gets 1 shift WO per shift)
+     * - WO Personal: allowed multiple, but only 1 per assigned_technician_id
+     *   per shift_date + shift_type. (different technicians = different WOs OK)
+     *
+     * @throws \RuntimeException when a duplicate would be created
+     */
+    private function assertNoDuplicate(array $data): void
+    {
+        $woType    = $data['wo_type'] ?? 'shift';
+        $shiftDate = $data['shift_date'] ?? null;
+        $shiftType = $data['shift_type'] ?? null;
+        $division  = $data['division'] ?? null;
+
+        if (!$shiftDate || !$shiftType || !$division) {
+            return; // Can't check without these fields
+        }
+
+        if ($woType === 'shift') {
+            // Only 1 shift WO per date+shift+division
+            $exists = WorkOrder::where('wo_type', 'shift')
+                ->where('shift_date', $shiftDate)
+                ->where('shift_type', $shiftType)
+                ->where('division', $division)
+                ->exists();
+
+            if ($exists) {
+                throw new RuntimeException(
+                    "Work Order Shift untuk divisi {$division} pada shift " .
+                    strtoupper($shiftType) . " tanggal {$shiftDate} sudah ada. " .
+                    "Hanya boleh 1 WO Shift per divisi per shift."
+                );
+            }
+        } elseif ($woType === 'personal') {
+            // Only 1 personal WO per technician per date+shift
+            $assignedTechnicianId = $data['assigned_technician_id'] ?? null;
+
+            if ($assignedTechnicianId) {
+                $exists = WorkOrder::where('wo_type', 'personal')
+                    ->where('shift_date', $shiftDate)
+                    ->where('shift_type', $shiftType)
+                    ->where('assigned_technician_id', $assignedTechnicianId)
+                    ->exists();
+
+                if ($exists) {
+                    $techName = LocalUser::find($assignedTechnicianId)?->name ?? 'Teknisi';
+                    throw new RuntimeException(
+                        "Work Order Personal untuk {$techName} pada shift " .
+                        strtoupper($shiftType) . " tanggal {$shiftDate} sudah ada. " .
+                        "Pilih teknisi yang berbeda."
+                    );
+                }
+            }
+        }
     }
 
     /**

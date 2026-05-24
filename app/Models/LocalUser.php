@@ -41,6 +41,11 @@ class LocalUser extends Authenticatable
         return $this->role === 'Manager Teknik';
     }
 
+    public function isGeneralManager(): bool
+    {
+        return $this->role === 'General Manager';
+    }
+
     public function isSupervisor(): bool
     {
         return in_array($this->role, ['Supervisor CNSD', 'Supervisor TFP']);
@@ -82,7 +87,7 @@ class LocalUser extends Authenticatable
         if (str_contains($this->role, 'TFP')) {
             return 'TFP';
         }
-        return null; // Admin, Manager Teknik — all divisions
+        return null; // Admin, Manager Teknik, General Manager — all divisions
     }
 
     // ─── Relationships ─────────────────────────────────────────

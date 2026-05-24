@@ -69,8 +69,13 @@ class WorkOrder extends Model
 
     /**
      * Valid work order types.
+     *
+     * - shift: standard division shift work order, auto-fills personnel from rostering.
+     * - personal: ad-hoc WO targeted at a single technician.
+     * - gm_directive: directive issued by General Manager to a Manager Teknik
+     *   (and optionally a Supervisor). No technician personnel assigned.
      */
-    public const TYPES = ['shift', 'personal'];
+    public const TYPES = ['shift', 'personal', 'gm_directive'];
 
     /**
      * Valid divisions.
@@ -136,6 +141,12 @@ class WorkOrder extends Model
 
     public function requiredSignatureRoles(): array
     {
+        // GM directive: no signatures required. The directive is "complete"
+        // when the GM marks it (or the shift ends → on_hold).
+        if ($this->wo_type === 'gm_directive') {
+            return [];
+        }
+
         return $this->has_supervisor
             ? ['mt', 'supervisor', 'technician']
             : ['mt', 'technician'];

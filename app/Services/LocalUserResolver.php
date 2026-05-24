@@ -39,15 +39,12 @@ class LocalUserResolver
 
     /**
      * Resolve and return the LocalUser model for the given rostering_user_id.
+     * If the user already exists locally, re-sync role/division from rostering
+     * in case their grade or employee_type changed.
      */
     public function ensureLocalUser(int $rosteringUserId): ?LocalUser
     {
-        $existing = LocalUser::where('rostering_user_id', $rosteringUserId)->first();
-        if ($existing) {
-            return $existing;
-        }
-
-        // Pull from rostering DB — read-only join
+        // Pull fresh data from rostering DB — read-only join
         try {
             $row = DB::connection('rostering')
                 ->table('users as u')
@@ -64,7 +61,8 @@ class LocalUserResolver
                 'rostering_user_id' => $rosteringUserId,
                 'error' => $e->getMessage(),
             ]);
-            return null;
+            // If rostering is unreachable, return existing local row if any
+            return LocalUser::where('rostering_user_id', $rosteringUserId)->first();
         }
 
         if (!$row) {
