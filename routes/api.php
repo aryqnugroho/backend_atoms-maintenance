@@ -18,6 +18,9 @@ use App\Http\Controllers\Api\V1\Cnsd\CnsdDvorMeterController;
 use App\Http\Controllers\Api\V1\Cnsd\CnsdDmeMeterController;
 use App\Http\Controllers\Api\V1\Cnsd\CnsdAtisMeterController;
 use App\Http\Controllers\Api\V1\Cnsd\CnsdAtcSystemMeterController;
+use App\Http\Controllers\Api\V1\Cnsd\CnsdVccsMeterController;
+use App\Http\Controllers\Api\V1\Cnsd\CnsdVccsFreqMeterController;
+use App\Http\Controllers\Api\V1\Cnsd\CnsdAsmgcsMeterController;
 use App\Http\Controllers\Api\V1\Tfp\TfpAobGroundController;
 use App\Http\Controllers\Api\V1\Tfp\TfpAobLt12Controller;
 use App\Http\Controllers\Api\V1\Tfp\TfpTransmitterTxController;
@@ -43,6 +46,16 @@ Route::prefix('v1')->group(function () {
     Route::post('/auth/login', [AuthController::class, 'login']);
     // verify: called by frontend on load to validate a rostering Sanctum token
     Route::get('/auth/verify', [AuthController::class, 'verify']);
+
+    // ─── Public Monitor (kiosk TV) ─────────────────────────────────────────
+    // These routes serve the workshop TV at /monitor and intentionally have
+    // NO auth middleware. The password modal in the kiosk is a UI gate, and
+    // the snapshot only exposes data already visible to authenticated users
+    // (no PII beyond names, no signatures, no tokens).
+    Route::prefix('public/monitor')->group(function () {
+        Route::post('/verify',   [\App\Http\Controllers\Api\V1\MonitorController::class, 'verify']);
+        Route::get('/snapshot',  [\App\Http\Controllers\Api\V1\MonitorController::class, 'snapshot']);
+    });
     
     // Protected Routes (Mock Auth or Sanctum)
     Route::middleware(['mockauth'])->group(function () {
@@ -56,24 +69,62 @@ Route::prefix('v1')->group(function () {
         Route::get('/dashboard/shift-checklist',  [\App\Http\Controllers\Api\V1\DashboardController::class, 'shiftChecklist']);
         Route::get('/dashboard/logbook-summary', [\App\Http\Controllers\Api\V1\DashboardController::class, 'logbookSummary']);
 
+        // Dashboard checklist settings — editable catalog backing the
+        // Pengingat card. Read open (so the dashboard can render); mutations
+        // gated to MT / Supervisor / Admin.
+        Route::prefix('dashboard/checklist')->group(function () {
+            $checklistEditRoles = 'role:Admin,Manager Teknik,Supervisor CNSD,Supervisor TFP';
+
+            Route::get('/modules', [\App\Http\Controllers\Api\V1\Dashboard\DashboardChecklistController::class, 'modules']);
+            Route::get('/items',   [\App\Http\Controllers\Api\V1\Dashboard\DashboardChecklistController::class, 'index']);
+
+            Route::post('/items',   [\App\Http\Controllers\Api\V1\Dashboard\DashboardChecklistController::class, 'store'])
+                ->middleware($checklistEditRoles);
+            Route::post('/items/reorder', [\App\Http\Controllers\Api\V1\Dashboard\DashboardChecklistController::class, 'reorder'])
+                ->middleware($checklistEditRoles);
+            Route::put('/items/{id}', [\App\Http\Controllers\Api\V1\Dashboard\DashboardChecklistController::class, 'update'])
+                ->whereNumber('id')->middleware($checklistEditRoles);
+            Route::delete('/items/{id}', [\App\Http\Controllers\Api\V1\Dashboard\DashboardChecklistController::class, 'destroy'])
+                ->whereNumber('id')->middleware($checklistEditRoles);
+        });
+
+        // Dashboard monthly checklist — periodic (per-month) targets like
+        // "Ground Check VHF minimum 2x per month". Read open, mutations
+        // gated to MT / Supervisor / Admin.
+        Route::prefix('dashboard/monthly')->group(function () {
+            $monthlyEditRoles = 'role:Admin,Manager Teknik,Supervisor CNSD,Supervisor TFP';
+
+            Route::get('/summary',  [\App\Http\Controllers\Api\V1\Dashboard\DashboardMonthlyController::class, 'summary']);
+            Route::get('/targets',  [\App\Http\Controllers\Api\V1\Dashboard\DashboardMonthlyController::class, 'index']);
+
+            Route::post('/targets', [\App\Http\Controllers\Api\V1\Dashboard\DashboardMonthlyController::class, 'store'])
+                ->middleware($monthlyEditRoles);
+            Route::post('/targets/reorder', [\App\Http\Controllers\Api\V1\Dashboard\DashboardMonthlyController::class, 'reorder'])
+                ->middleware($monthlyEditRoles);
+            Route::put('/targets/{id}', [\App\Http\Controllers\Api\V1\Dashboard\DashboardMonthlyController::class, 'update'])
+                ->whereNumber('id')->middleware($monthlyEditRoles);
+            Route::delete('/targets/{id}', [\App\Http\Controllers\Api\V1\Dashboard\DashboardMonthlyController::class, 'destroy'])
+                ->whereNumber('id')->middleware($monthlyEditRoles);
+        });
+
         // ─── Work Orders ───────────────────────────────────────
         // All authenticated users can read (Teknisi visibility filtered in service)
         Route::get('/work-orders', [WorkOrderController::class, 'index']);
         Route::get('/work-orders/years', [WorkOrderController::class, 'years']);
         Route::get('/work-orders/{id}', [WorkOrderController::class, 'show']);
 
-        // Create: Admin, Manager, Supervisors only
+        // Create: Admin, Manager, Supervisors, and General Manager (for gm_directive WOs)
         Route::post('/work-orders', [WorkOrderController::class, 'store'])
-            ->middleware('role:Admin,Manager Teknik,Supervisor CNSD,Supervisor TFP');
+            ->middleware('role:Admin,Manager Teknik,General Manager,Supervisor CNSD,Supervisor TFP');
 
         // Update: all roles can attempt (policy enforces per-resource rules)
         Route::put('/work-orders/{id}', [WorkOrderController::class, 'update']);
         Route::post('/work-orders/{id}/sign', [WorkOrderController::class, 'sign']);
         Route::get('/work-orders/{id}/print', [WorkOrderController::class, 'print']);
 
-        // Delete: Admin and Manager only
+        // Delete: Admin, Manager, and General Manager (latter for own gm_directive WOs)
         Route::delete('/work-orders/{id}', [WorkOrderController::class, 'destroy'])
-            ->middleware('role:Admin,Manager Teknik');
+            ->middleware('role:Admin,Manager Teknik,General Manager,Supervisor CNSD,Supervisor TFP');
 
         // ─── CNSD Equipment Readiness (Form EQ-1) ──────────────
         // Pilot module — only "Kesiapan Peralatan CNSD" is wired up. Other
@@ -87,7 +138,7 @@ Route::prefix('v1')->group(function () {
 
             Route::get('/',         [CnsdReadinessController::class, 'index']);
             Route::post('/', [CnsdReadinessController::class, 'store'])
-                ->middleware('role:Admin,Manager Teknik,Supervisor CNSD,Teknisi CNSD');
+                ->middleware('role:Admin,Manager Teknik,Supervisor CNSD,Supervisor TFP,Teknisi CNSD');
 
             Route::get('/{id}',     [CnsdReadinessController::class, 'show'])->whereNumber('id');
             Route::put('/{id}',     [CnsdReadinessController::class, 'update'])->whereNumber('id');
@@ -97,20 +148,20 @@ Route::prefix('v1')->group(function () {
             // (also enforced server-side in the controller method).
             Route::post('/{id}/items', [CnsdReadinessController::class, 'addItem'])
                 ->whereNumber('id')
-                ->middleware('role:Admin,Manager Teknik,Supervisor CNSD');
+                ->middleware('role:Admin,Manager Teknik,Supervisor CNSD,Supervisor TFP');
             Route::put('/{id}/items/{itemId}', [CnsdReadinessController::class, 'updateItem'])
                 ->whereNumber('id')->whereNumber('itemId')
-                ->middleware('role:Admin,Manager Teknik,Supervisor CNSD');
+                ->middleware('role:Admin,Manager Teknik,Supervisor CNSD,Supervisor TFP');
             Route::delete('/{id}/items/{itemId}', [CnsdReadinessController::class, 'deleteItem'])
                 ->whereNumber('id')->whereNumber('itemId')
-                ->middleware('role:Admin,Manager Teknik,Supervisor CNSD');
+                ->middleware('role:Admin,Manager Teknik,Supervisor CNSD,Supervisor TFP');
             Route::put('/{id}/sections', [CnsdReadinessController::class, 'renameSection'])
                 ->whereNumber('id')
-                ->middleware('role:Admin,Manager Teknik,Supervisor CNSD');
+                ->middleware('role:Admin,Manager Teknik,Supervisor CNSD,Supervisor TFP');
 
             Route::delete('/{id}', [CnsdReadinessController::class, 'destroy'])
                 ->whereNumber('id')
-                ->middleware('role:Admin,Manager Teknik');
+                ->middleware('role:Admin,Manager Teknik,Supervisor CNSD,Supervisor TFP');
         });
 
         // ─── CNSD Radar Meter Reading (Form RADAR-METER) ───────
@@ -123,14 +174,14 @@ Route::prefix('v1')->group(function () {
 
             Route::get('/',         [CnsdRadarMeterController::class, 'index']);
             Route::post('/', [CnsdRadarMeterController::class, 'store'])
-                ->middleware('role:Admin,Manager Teknik,Supervisor CNSD,Teknisi CNSD');
+                ->middleware('role:Admin,Manager Teknik,Supervisor CNSD,Supervisor TFP,Teknisi CNSD');
 
             Route::get('/{id}',     [CnsdRadarMeterController::class, 'show'])->whereNumber('id');
             Route::put('/{id}',     [CnsdRadarMeterController::class, 'update'])->whereNumber('id');
             Route::post('/{id}/sign', [CnsdRadarMeterController::class, 'sign'])->whereNumber('id');
             Route::delete('/{id}', [CnsdRadarMeterController::class, 'destroy'])
                 ->whereNumber('id')
-                ->middleware('role:Admin,Manager Teknik');
+                ->middleware('role:Admin,Manager Teknik,Supervisor CNSD,Supervisor TFP');
         });
 
         // ─── CNSD Recorder Meter Reading (Form RECORDER-METER / FORM C-3) ───
@@ -144,14 +195,14 @@ Route::prefix('v1')->group(function () {
 
             Route::get('/',         [CnsdRecorderMeterController::class, 'index']);
             Route::post('/', [CnsdRecorderMeterController::class, 'store'])
-                ->middleware('role:Admin,Manager Teknik,Supervisor CNSD,Teknisi CNSD');
+                ->middleware('role:Admin,Manager Teknik,Supervisor CNSD,Supervisor TFP,Teknisi CNSD');
 
             Route::get('/{id}',     [CnsdRecorderMeterController::class, 'show'])->whereNumber('id');
             Route::put('/{id}',     [CnsdRecorderMeterController::class, 'update'])->whereNumber('id');
             Route::post('/{id}/sign', [CnsdRecorderMeterController::class, 'sign'])->whereNumber('id');
             Route::delete('/{id}', [CnsdRecorderMeterController::class, 'destroy'])
                 ->whereNumber('id')
-                ->middleware('role:Admin,Manager Teknik');
+                ->middleware('role:Admin,Manager Teknik,Supervisor CNSD,Supervisor TFP');
         });
 
         // ─── CNSD AMSC Meter Reading (Form AMSC-METER) ───────────
@@ -162,14 +213,14 @@ Route::prefix('v1')->group(function () {
 
             Route::get('/',         [CnsdAmscMeterController::class, 'index']);
             Route::post('/', [CnsdAmscMeterController::class, 'store'])
-                ->middleware('role:Admin,Manager Teknik,Supervisor CNSD,Teknisi CNSD');
+                ->middleware('role:Admin,Manager Teknik,Supervisor CNSD,Supervisor TFP,Teknisi CNSD');
 
             Route::get('/{id}',     [CnsdAmscMeterController::class, 'show'])->whereNumber('id');
             Route::put('/{id}',     [CnsdAmscMeterController::class, 'update'])->whereNumber('id');
             Route::post('/{id}/sign', [CnsdAmscMeterController::class, 'sign'])->whereNumber('id');
             Route::delete('/{id}', [CnsdAmscMeterController::class, 'destroy'])
                 ->whereNumber('id')
-                ->middleware('role:Admin,Manager Teknik');
+                ->middleware('role:Admin,Manager Teknik,Supervisor CNSD,Supervisor TFP');
         });
 
         // ─── CNSD Transmitter Meter Reading (Form TRANSMITTER-METER / FORM C-1) ───
@@ -180,14 +231,14 @@ Route::prefix('v1')->group(function () {
 
             Route::get('/',         [CnsdTransmitterMeterController::class, 'index']);
             Route::post('/', [CnsdTransmitterMeterController::class, 'store'])
-                ->middleware('role:Admin,Manager Teknik,Supervisor CNSD,Teknisi CNSD');
+                ->middleware('role:Admin,Manager Teknik,Supervisor CNSD,Supervisor TFP,Teknisi CNSD');
 
             Route::get('/{id}',     [CnsdTransmitterMeterController::class, 'show'])->whereNumber('id');
             Route::put('/{id}',     [CnsdTransmitterMeterController::class, 'update'])->whereNumber('id');
             Route::post('/{id}/sign', [CnsdTransmitterMeterController::class, 'sign'])->whereNumber('id');
             Route::delete('/{id}', [CnsdTransmitterMeterController::class, 'destroy'])
                 ->whereNumber('id')
-                ->middleware('role:Admin,Manager Teknik');
+                ->middleware('role:Admin,Manager Teknik,Supervisor CNSD,Supervisor TFP');
         });
 
         // ─── CNSD Receiver Meter Reading (Form RECEIVER-METER / FORM C-2) ───
@@ -198,14 +249,14 @@ Route::prefix('v1')->group(function () {
 
             Route::get('/',         [CnsdReceiverMeterController::class, 'index']);
             Route::post('/', [CnsdReceiverMeterController::class, 'store'])
-                ->middleware('role:Admin,Manager Teknik,Supervisor CNSD,Teknisi CNSD');
+                ->middleware('role:Admin,Manager Teknik,Supervisor CNSD,Supervisor TFP,Teknisi CNSD');
 
             Route::get('/{id}',     [CnsdReceiverMeterController::class, 'show'])->whereNumber('id');
             Route::put('/{id}',     [CnsdReceiverMeterController::class, 'update'])->whereNumber('id');
             Route::post('/{id}/sign', [CnsdReceiverMeterController::class, 'sign'])->whereNumber('id');
             Route::delete('/{id}', [CnsdReceiverMeterController::class, 'destroy'])
                 ->whereNumber('id')
-                ->middleware('role:Admin,Manager Teknik');
+                ->middleware('role:Admin,Manager Teknik,Supervisor CNSD,Supervisor TFP');
         });
 
         // ─── CNSD Glide Path Meter Reading (Form GLIDEPATH-METER / ILS-GP) ───
@@ -215,12 +266,12 @@ Route::prefix('v1')->group(function () {
             Route::get('/years',    [CnsdGlidepathMeterController::class, 'years']);
             Route::get('/',         [CnsdGlidepathMeterController::class, 'index']);
             Route::post('/', [CnsdGlidepathMeterController::class, 'store'])
-                ->middleware('role:Admin,Manager Teknik,Supervisor CNSD,Teknisi CNSD');
+                ->middleware('role:Admin,Manager Teknik,Supervisor CNSD,Supervisor TFP,Teknisi CNSD');
             Route::get('/{id}',       [CnsdGlidepathMeterController::class, 'show'])->whereNumber('id');
             Route::put('/{id}',       [CnsdGlidepathMeterController::class, 'update'])->whereNumber('id');
             Route::post('/{id}/sign', [CnsdGlidepathMeterController::class, 'sign'])->whereNumber('id');
             Route::delete('/{id}',    [CnsdGlidepathMeterController::class, 'destroy'])
-                ->whereNumber('id')->middleware('role:Admin,Manager Teknik');
+                ->whereNumber('id')->middleware('role:Admin,Manager Teknik,Supervisor CNSD,Supervisor TFP');
         });
 
         // ─── CNSD Localizer Meter Reading (Form LOCALIZER-METER / ILS-LLZ) ───
@@ -230,12 +281,12 @@ Route::prefix('v1')->group(function () {
             Route::get('/years',    [CnsdLocalizerMeterController::class, 'years']);
             Route::get('/',         [CnsdLocalizerMeterController::class, 'index']);
             Route::post('/', [CnsdLocalizerMeterController::class, 'store'])
-                ->middleware('role:Admin,Manager Teknik,Supervisor CNSD,Teknisi CNSD');
+                ->middleware('role:Admin,Manager Teknik,Supervisor CNSD,Supervisor TFP,Teknisi CNSD');
             Route::get('/{id}',       [CnsdLocalizerMeterController::class, 'show'])->whereNumber('id');
             Route::put('/{id}',       [CnsdLocalizerMeterController::class, 'update'])->whereNumber('id');
             Route::post('/{id}/sign', [CnsdLocalizerMeterController::class, 'sign'])->whereNumber('id');
             Route::delete('/{id}',    [CnsdLocalizerMeterController::class, 'destroy'])
-                ->whereNumber('id')->middleware('role:Admin,Manager Teknik');
+                ->whereNumber('id')->middleware('role:Admin,Manager Teknik,Supervisor CNSD,Supervisor TFP');
         });
 
         // ─── CNSD T-DME Meter Reading (Form TDME-METER / FORM N-5) ───
@@ -245,12 +296,12 @@ Route::prefix('v1')->group(function () {
             Route::get('/years',    [CnsdTdmeMeterController::class, 'years']);
             Route::get('/',         [CnsdTdmeMeterController::class, 'index']);
             Route::post('/', [CnsdTdmeMeterController::class, 'store'])
-                ->middleware('role:Admin,Manager Teknik,Supervisor CNSD,Teknisi CNSD');
+                ->middleware('role:Admin,Manager Teknik,Supervisor CNSD,Supervisor TFP,Teknisi CNSD');
             Route::get('/{id}',       [CnsdTdmeMeterController::class, 'show'])->whereNumber('id');
             Route::put('/{id}',       [CnsdTdmeMeterController::class, 'update'])->whereNumber('id');
             Route::post('/{id}/sign', [CnsdTdmeMeterController::class, 'sign'])->whereNumber('id');
             Route::delete('/{id}',    [CnsdTdmeMeterController::class, 'destroy'])
-                ->whereNumber('id')->middleware('role:Admin,Manager Teknik');
+                ->whereNumber('id')->middleware('role:Admin,Manager Teknik,Supervisor CNSD,Supervisor TFP');
         });
 
         // ─── CNSD DVOR Meter Reading (Form DVOR-METER / FORM N-5) ───
@@ -260,12 +311,12 @@ Route::prefix('v1')->group(function () {
             Route::get('/years',    [CnsdDvorMeterController::class, 'years']);
             Route::get('/',         [CnsdDvorMeterController::class, 'index']);
             Route::post('/', [CnsdDvorMeterController::class, 'store'])
-                ->middleware('role:Admin,Manager Teknik,Supervisor CNSD,Teknisi CNSD');
+                ->middleware('role:Admin,Manager Teknik,Supervisor CNSD,Supervisor TFP,Teknisi CNSD');
             Route::get('/{id}',       [CnsdDvorMeterController::class, 'show'])->whereNumber('id');
             Route::put('/{id}',       [CnsdDvorMeterController::class, 'update'])->whereNumber('id');
             Route::post('/{id}/sign', [CnsdDvorMeterController::class, 'sign'])->whereNumber('id');
             Route::delete('/{id}',    [CnsdDvorMeterController::class, 'destroy'])
-                ->whereNumber('id')->middleware('role:Admin,Manager Teknik');
+                ->whereNumber('id')->middleware('role:Admin,Manager Teknik,Supervisor CNSD,Supervisor TFP');
         });
 
         // ─── CNSD DME Meter Reading (Form DME-METER / FORM N-5) ───
@@ -275,12 +326,12 @@ Route::prefix('v1')->group(function () {
             Route::get('/years',    [CnsdDmeMeterController::class, 'years']);
             Route::get('/',         [CnsdDmeMeterController::class, 'index']);
             Route::post('/', [CnsdDmeMeterController::class, 'store'])
-                ->middleware('role:Admin,Manager Teknik,Supervisor CNSD,Teknisi CNSD');
+                ->middleware('role:Admin,Manager Teknik,Supervisor CNSD,Supervisor TFP,Teknisi CNSD');
             Route::get('/{id}',       [CnsdDmeMeterController::class, 'show'])->whereNumber('id');
             Route::put('/{id}',       [CnsdDmeMeterController::class, 'update'])->whereNumber('id');
             Route::post('/{id}/sign', [CnsdDmeMeterController::class, 'sign'])->whereNumber('id');
             Route::delete('/{id}',    [CnsdDmeMeterController::class, 'destroy'])
-                ->whereNumber('id')->middleware('role:Admin,Manager Teknik');
+                ->whereNumber('id')->middleware('role:Admin,Manager Teknik,Supervisor CNSD,Supervisor TFP');
         });
 
         // ─── CNSD ATIS Meter Reading (Form ATIS-METER, Reproducer ATIS) ───
@@ -290,12 +341,12 @@ Route::prefix('v1')->group(function () {
             Route::get('/years',    [CnsdAtisMeterController::class, 'years']);
             Route::get('/',         [CnsdAtisMeterController::class, 'index']);
             Route::post('/', [CnsdAtisMeterController::class, 'store'])
-                ->middleware('role:Admin,Manager Teknik,Supervisor CNSD,Teknisi CNSD');
+                ->middleware('role:Admin,Manager Teknik,Supervisor CNSD,Supervisor TFP,Teknisi CNSD');
             Route::get('/{id}',       [CnsdAtisMeterController::class, 'show'])->whereNumber('id');
             Route::put('/{id}',       [CnsdAtisMeterController::class, 'update'])->whereNumber('id');
             Route::post('/{id}/sign', [CnsdAtisMeterController::class, 'sign'])->whereNumber('id');
             Route::delete('/{id}',    [CnsdAtisMeterController::class, 'destroy'])
-                ->whereNumber('id')->middleware('role:Admin,Manager Teknik');
+                ->whereNumber('id')->middleware('role:Admin,Manager Teknik,Supervisor CNSD,Supervisor TFP');
         });
 
         // ─── CNSD ATC SYSTEM Meter Reading (Form A-1, Approach System / Tern ATS System) ───
@@ -305,12 +356,59 @@ Route::prefix('v1')->group(function () {
             Route::get('/years',    [CnsdAtcSystemMeterController::class, 'years']);
             Route::get('/',         [CnsdAtcSystemMeterController::class, 'index']);
             Route::post('/', [CnsdAtcSystemMeterController::class, 'store'])
-                ->middleware('role:Admin,Manager Teknik,Supervisor CNSD,Teknisi CNSD');
+                ->middleware('role:Admin,Manager Teknik,Supervisor CNSD,Supervisor TFP,Teknisi CNSD');
             Route::get('/{id}',       [CnsdAtcSystemMeterController::class, 'show'])->whereNumber('id');
             Route::put('/{id}',       [CnsdAtcSystemMeterController::class, 'update'])->whereNumber('id');
             Route::post('/{id}/sign', [CnsdAtcSystemMeterController::class, 'sign'])->whereNumber('id');
             Route::delete('/{id}',    [CnsdAtcSystemMeterController::class, 'destroy'])
-                ->whereNumber('id')->middleware('role:Admin,Manager Teknik');
+                ->whereNumber('id')->middleware('role:Admin,Manager Teknik,Supervisor CNSD,Supervisor TFP');
+        });
+
+        // ─── CNSD VCCS Meter Reading (Form VCCS-METER, VCCS LES) ────
+        // Fourteenth CNSD module — "Meter Reading VCCS" (brand LES).
+        Route::prefix('cnsd/vccs-meter')->group(function () {
+            Route::get('/template', [CnsdVccsMeterController::class, 'template']);
+            Route::get('/years',    [CnsdVccsMeterController::class, 'years']);
+            Route::get('/',         [CnsdVccsMeterController::class, 'index']);
+            Route::post('/', [CnsdVccsMeterController::class, 'store'])
+                ->middleware('role:Admin,Manager Teknik,Supervisor CNSD,Supervisor TFP,Teknisi CNSD');
+            Route::get('/{id}',       [CnsdVccsMeterController::class, 'show'])->whereNumber('id');
+            Route::put('/{id}',       [CnsdVccsMeterController::class, 'update'])->whereNumber('id');
+            Route::post('/{id}/sign', [CnsdVccsMeterController::class, 'sign'])->whereNumber('id');
+            Route::delete('/{id}',    [CnsdVccsMeterController::class, 'destroy'])
+                ->whereNumber('id')->middleware('role:Admin,Manager Teknik,Supervisor CNSD,Supervisor TFP');
+        });
+
+        // ─── CNSD VCCS Frequentis Meter Reading (Form VCCS-FREQ-METER) ────
+        // Fifteenth CNSD module — "Meter Reading VCCS" (brand FREQUENTIS).
+        // Sister module to CNSD-014 (LES) with the same UI conventions but
+        // independent data and its own paper-form content.
+        Route::prefix('cnsd/vccs-freq-meter')->group(function () {
+            Route::get('/template', [CnsdVccsFreqMeterController::class, 'template']);
+            Route::get('/years',    [CnsdVccsFreqMeterController::class, 'years']);
+            Route::get('/',         [CnsdVccsFreqMeterController::class, 'index']);
+            Route::post('/', [CnsdVccsFreqMeterController::class, 'store'])
+                ->middleware('role:Admin,Manager Teknik,Supervisor CNSD,Supervisor TFP,Teknisi CNSD');
+            Route::get('/{id}',       [CnsdVccsFreqMeterController::class, 'show'])->whereNumber('id');
+            Route::put('/{id}',       [CnsdVccsFreqMeterController::class, 'update'])->whereNumber('id');
+            Route::post('/{id}/sign', [CnsdVccsFreqMeterController::class, 'sign'])->whereNumber('id');
+            Route::delete('/{id}',    [CnsdVccsFreqMeterController::class, 'destroy'])
+                ->whereNumber('id')->middleware('role:Admin,Manager Teknik,Supervisor CNSD,Supervisor TFP');
+        });
+
+        // ─── CNSD ASMGCS Meter Reading (Form ASMGCS-METER, SAAB) ────
+        // Sixteenth CNSD module — "Meter Reading ASMGCS" (brand SAAB).
+        Route::prefix('cnsd/asmgcs-meter')->group(function () {
+            Route::get('/template', [CnsdAsmgcsMeterController::class, 'template']);
+            Route::get('/years',    [CnsdAsmgcsMeterController::class, 'years']);
+            Route::get('/',         [CnsdAsmgcsMeterController::class, 'index']);
+            Route::post('/', [CnsdAsmgcsMeterController::class, 'store'])
+                ->middleware('role:Admin,Manager Teknik,Supervisor CNSD,Supervisor TFP,Teknisi CNSD');
+            Route::get('/{id}',       [CnsdAsmgcsMeterController::class, 'show'])->whereNumber('id');
+            Route::put('/{id}',       [CnsdAsmgcsMeterController::class, 'update'])->whereNumber('id');
+            Route::post('/{id}/sign', [CnsdAsmgcsMeterController::class, 'sign'])->whereNumber('id');
+            Route::delete('/{id}',    [CnsdAsmgcsMeterController::class, 'destroy'])
+                ->whereNumber('id')->middleware('role:Admin,Manager Teknik,Supervisor CNSD,Supervisor TFP');
         });
 
         // ─── TFP Performance Check AOB Lantai Ground ───────────
@@ -319,13 +417,13 @@ Route::prefix('v1')->group(function () {
             Route::get('/years',    [TfpAobGroundController::class, 'years']);
             Route::get('/',         [TfpAobGroundController::class, 'index']);
             Route::post('/', [TfpAobGroundController::class, 'store'])
-                ->middleware('role:Admin,Manager Teknik,Supervisor TFP,Teknisi TFP');
+                ->middleware('role:Admin,Manager Teknik,Supervisor CNSD,Supervisor TFP,Teknisi TFP');
             Route::get('/{id}',     [TfpAobGroundController::class, 'show'])->whereNumber('id');
             Route::put('/{id}',     [TfpAobGroundController::class, 'update'])->whereNumber('id');
             Route::post('/{id}/sign', [TfpAobGroundController::class, 'sign'])->whereNumber('id');
             Route::delete('/{id}', [TfpAobGroundController::class, 'destroy'])
                 ->whereNumber('id')
-                ->middleware('role:Admin,Manager Teknik');
+                ->middleware('role:Admin,Manager Teknik,Supervisor CNSD,Supervisor TFP');
 
             // Structural edit (Edit Mode) — controller enforces role guard
             Route::put('/{id}/structure',              [TfpAobGroundController::class, 'saveStructure'])->whereNumber('id');
@@ -345,13 +443,13 @@ Route::prefix('v1')->group(function () {
             Route::get('/years',    [TfpAobLt12Controller::class, 'years']);
             Route::get('/',         [TfpAobLt12Controller::class, 'index']);
             Route::post('/', [TfpAobLt12Controller::class, 'store'])
-                ->middleware('role:Admin,Manager Teknik,Supervisor TFP,Teknisi TFP');
+                ->middleware('role:Admin,Manager Teknik,Supervisor CNSD,Supervisor TFP,Teknisi TFP');
             Route::get('/{id}',     [TfpAobLt12Controller::class, 'show'])->whereNumber('id');
             Route::put('/{id}',     [TfpAobLt12Controller::class, 'update'])->whereNumber('id');
             Route::post('/{id}/sign', [TfpAobLt12Controller::class, 'sign'])->whereNumber('id');
             Route::delete('/{id}', [TfpAobLt12Controller::class, 'destroy'])
                 ->whereNumber('id')
-                ->middleware('role:Admin,Manager Teknik');
+                ->middleware('role:Admin,Manager Teknik,Supervisor CNSD,Supervisor TFP');
 
             // Structural edit (Edit Mode) — controller enforces role guard
             Route::put('/{id}/structure',                  [TfpAobLt12Controller::class, 'saveStructure'])->whereNumber('id');
@@ -371,13 +469,13 @@ Route::prefix('v1')->group(function () {
             Route::get('/years',    [TfpTransmitterTxController::class, 'years']);
             Route::get('/',         [TfpTransmitterTxController::class, 'index']);
             Route::post('/', [TfpTransmitterTxController::class, 'store'])
-                ->middleware('role:Admin,Manager Teknik,Supervisor TFP,Teknisi TFP');
+                ->middleware('role:Admin,Manager Teknik,Supervisor CNSD,Supervisor TFP,Teknisi TFP');
             Route::get('/{id}',     [TfpTransmitterTxController::class, 'show'])->whereNumber('id');
             Route::put('/{id}',     [TfpTransmitterTxController::class, 'update'])->whereNumber('id');
             Route::post('/{id}/sign', [TfpTransmitterTxController::class, 'sign'])->whereNumber('id');
             Route::delete('/{id}', [TfpTransmitterTxController::class, 'destroy'])
                 ->whereNumber('id')
-                ->middleware('role:Admin,Manager Teknik');
+                ->middleware('role:Admin,Manager Teknik,Supervisor CNSD,Supervisor TFP');
 
             // Structural edit (Edit Mode) — controller enforces role guard
             Route::put('/{id}/structure',                  [TfpTransmitterTxController::class, 'saveStructure'])->whereNumber('id');
@@ -397,13 +495,13 @@ Route::prefix('v1')->group(function () {
             Route::get('/years',    [TfpTowerController::class, 'years']);
             Route::get('/',         [TfpTowerController::class, 'index']);
             Route::post('/', [TfpTowerController::class, 'store'])
-                ->middleware('role:Admin,Manager Teknik,Supervisor TFP,Teknisi TFP');
+                ->middleware('role:Admin,Manager Teknik,Supervisor CNSD,Supervisor TFP,Teknisi TFP');
             Route::get('/{id}',     [TfpTowerController::class, 'show'])->whereNumber('id');
             Route::put('/{id}',     [TfpTowerController::class, 'update'])->whereNumber('id');
             Route::post('/{id}/sign', [TfpTowerController::class, 'sign'])->whereNumber('id');
             Route::delete('/{id}', [TfpTowerController::class, 'destroy'])
                 ->whereNumber('id')
-                ->middleware('role:Admin,Manager Teknik');
+                ->middleware('role:Admin,Manager Teknik,Supervisor CNSD,Supervisor TFP');
 
             // Structural edit (Edit Mode) — controller enforces role guard
             Route::put('/{id}/structure',                  [TfpTowerController::class, 'saveStructure'])->whereNumber('id');
@@ -423,13 +521,13 @@ Route::prefix('v1')->group(function () {
             Route::get('/years',    [TfpRadarController::class, 'years']);
             Route::get('/',         [TfpRadarController::class, 'index']);
             Route::post('/', [TfpRadarController::class, 'store'])
-                ->middleware('role:Admin,Manager Teknik,Supervisor TFP,Teknisi TFP');
+                ->middleware('role:Admin,Manager Teknik,Supervisor CNSD,Supervisor TFP,Teknisi TFP');
             Route::get('/{id}',     [TfpRadarController::class, 'show'])->whereNumber('id');
             Route::put('/{id}',     [TfpRadarController::class, 'update'])->whereNumber('id');
             Route::post('/{id}/sign', [TfpRadarController::class, 'sign'])->whereNumber('id');
             Route::delete('/{id}', [TfpRadarController::class, 'destroy'])
                 ->whereNumber('id')
-                ->middleware('role:Admin,Manager Teknik');
+                ->middleware('role:Admin,Manager Teknik,Supervisor CNSD,Supervisor TFP');
 
             // Structural edit (Edit Mode) — controller enforces role guard
             Route::put('/{id}/structure',                  [TfpRadarController::class, 'saveStructure'])->whereNumber('id');
@@ -449,13 +547,13 @@ Route::prefix('v1')->group(function () {
             Route::get('/years',    [TfpDvorController::class, 'years']);
             Route::get('/',         [TfpDvorController::class, 'index']);
             Route::post('/', [TfpDvorController::class, 'store'])
-                ->middleware('role:Admin,Manager Teknik,Supervisor TFP,Teknisi TFP');
+                ->middleware('role:Admin,Manager Teknik,Supervisor CNSD,Supervisor TFP,Teknisi TFP');
             Route::get('/{id}',     [TfpDvorController::class, 'show'])->whereNumber('id');
             Route::put('/{id}',     [TfpDvorController::class, 'update'])->whereNumber('id');
             Route::post('/{id}/sign', [TfpDvorController::class, 'sign'])->whereNumber('id');
             Route::delete('/{id}', [TfpDvorController::class, 'destroy'])
                 ->whereNumber('id')
-                ->middleware('role:Admin,Manager Teknik');
+                ->middleware('role:Admin,Manager Teknik,Supervisor CNSD,Supervisor TFP');
 
             // Structural edit (Edit Mode) — controller enforces role guard
             Route::put('/{id}/structure',                  [TfpDvorController::class, 'saveStructure'])->whereNumber('id');
@@ -475,13 +573,13 @@ Route::prefix('v1')->group(function () {
             Route::get('/years',    [TfpLocalizerController::class, 'years']);
             Route::get('/',         [TfpLocalizerController::class, 'index']);
             Route::post('/', [TfpLocalizerController::class, 'store'])
-                ->middleware('role:Admin,Manager Teknik,Supervisor TFP,Teknisi TFP');
+                ->middleware('role:Admin,Manager Teknik,Supervisor CNSD,Supervisor TFP,Teknisi TFP');
             Route::get('/{id}',     [TfpLocalizerController::class, 'show'])->whereNumber('id');
             Route::put('/{id}',     [TfpLocalizerController::class, 'update'])->whereNumber('id');
             Route::post('/{id}/sign', [TfpLocalizerController::class, 'sign'])->whereNumber('id');
             Route::delete('/{id}', [TfpLocalizerController::class, 'destroy'])
                 ->whereNumber('id')
-                ->middleware('role:Admin,Manager Teknik');
+                ->middleware('role:Admin,Manager Teknik,Supervisor CNSD,Supervisor TFP');
 
             // Structural edit (Edit Mode) — controller enforces role guard
             Route::put('/{id}/structure',                  [TfpLocalizerController::class, 'saveStructure'])->whereNumber('id');
@@ -501,13 +599,13 @@ Route::prefix('v1')->group(function () {
             Route::get('/years',    [TfpGlidepathController::class, 'years']);
             Route::get('/',         [TfpGlidepathController::class, 'index']);
             Route::post('/', [TfpGlidepathController::class, 'store'])
-                ->middleware('role:Admin,Manager Teknik,Supervisor TFP,Teknisi TFP');
+                ->middleware('role:Admin,Manager Teknik,Supervisor CNSD,Supervisor TFP,Teknisi TFP');
             Route::get('/{id}',     [TfpGlidepathController::class, 'show'])->whereNumber('id');
             Route::put('/{id}',     [TfpGlidepathController::class, 'update'])->whereNumber('id');
             Route::post('/{id}/sign', [TfpGlidepathController::class, 'sign'])->whereNumber('id');
             Route::delete('/{id}', [TfpGlidepathController::class, 'destroy'])
                 ->whereNumber('id')
-                ->middleware('role:Admin,Manager Teknik');
+                ->middleware('role:Admin,Manager Teknik,Supervisor CNSD,Supervisor TFP');
 
             // Structural edit (Edit Mode) — controller enforces role guard
             Route::put('/{id}/structure',                  [TfpGlidepathController::class, 'saveStructure'])->whereNumber('id');
@@ -527,13 +625,13 @@ Route::prefix('v1')->group(function () {
             Route::get('/years',    [GroundingReportController::class, 'years']);
             Route::get('/',         [GroundingReportController::class, 'index']);
             Route::post('/', [GroundingReportController::class, 'store'])
-                ->middleware('role:Admin,Manager Teknik,Supervisor TFP,Teknisi TFP');
+                ->middleware('role:Admin,Manager Teknik,Supervisor CNSD,Supervisor TFP,Teknisi TFP');
             Route::get('/{id}',     [GroundingReportController::class, 'show'])->whereNumber('id');
             Route::put('/{id}',     [GroundingReportController::class, 'update'])->whereNumber('id');
             Route::post('/{id}/sign', [GroundingReportController::class, 'sign'])->whereNumber('id');
             Route::delete('/{id}', [GroundingReportController::class, 'destroy'])
                 ->whereNumber('id')
-                ->middleware('role:Admin,Manager Teknik');
+                ->middleware('role:Admin,Manager Teknik,Supervisor CNSD,Supervisor TFP');
         });
 
         // ─── Ground Check ADC ───────────────────────────────────────
@@ -542,7 +640,7 @@ Route::prefix('v1')->group(function () {
             Route::get('/years',    [GroundCheckAdcController::class, 'years']);
             Route::get('/',         [GroundCheckAdcController::class, 'index']);
             Route::post('/', [GroundCheckAdcController::class, 'store'])
-                ->middleware('role:Admin,Manager Teknik,Supervisor CNSD,Teknisi CNSD');
+                ->middleware('role:Admin,Manager Teknik,Supervisor CNSD,Supervisor TFP,Teknisi CNSD');
             Route::get('/{id}',     [GroundCheckAdcController::class, 'show'])->whereNumber('id');
             Route::put('/{id}',     [GroundCheckAdcController::class, 'update'])->whereNumber('id');
             Route::post('/{id}/sign', [GroundCheckAdcController::class, 'sign'])->whereNumber('id');
@@ -552,7 +650,7 @@ Route::prefix('v1')->group(function () {
             Route::delete('/{id}/photos/{photoId}', [GroundCheckAdcController::class, 'deletePhoto'])->whereNumber('id')->whereNumber('photoId');
             Route::delete('/{id}', [GroundCheckAdcController::class, 'destroy'])
                 ->whereNumber('id')
-                ->middleware('role:Admin,Manager Teknik');
+                ->middleware('role:Admin,Manager Teknik,Supervisor CNSD,Supervisor TFP');
         });
 
         // ─── Ground Check VHF ───────────────────────────────────────
@@ -561,7 +659,7 @@ Route::prefix('v1')->group(function () {
             Route::get('/years',    [GroundCheckVhfController::class, 'years']);
             Route::get('/',         [GroundCheckVhfController::class, 'index']);
             Route::post('/', [GroundCheckVhfController::class, 'store'])
-                ->middleware('role:Admin,Manager Teknik,Supervisor CNSD,Teknisi CNSD');
+                ->middleware('role:Admin,Manager Teknik,Supervisor CNSD,Supervisor TFP,Teknisi CNSD');
             Route::get('/{id}',     [GroundCheckVhfController::class, 'show'])->whereNumber('id');
             Route::put('/{id}',     [GroundCheckVhfController::class, 'update'])->whereNumber('id');
             Route::post('/{id}/sign', [GroundCheckVhfController::class, 'sign'])->whereNumber('id');
@@ -571,7 +669,7 @@ Route::prefix('v1')->group(function () {
             Route::delete('/{id}/photos/{photoId}', [GroundCheckVhfController::class, 'deletePhoto'])->whereNumber('id')->whereNumber('photoId');
             Route::delete('/{id}', [GroundCheckVhfController::class, 'destroy'])
                 ->whereNumber('id')
-                ->middleware('role:Admin,Manager Teknik');
+                ->middleware('role:Admin,Manager Teknik,Supervisor CNSD,Supervisor TFP');
         });
 
         // ─── Ground Check LLZ (ILS Localizer) ───────────────────────
@@ -580,7 +678,7 @@ Route::prefix('v1')->group(function () {
             Route::get('/years',    [GroundCheckLlzController::class, 'years']);
             Route::get('/',         [GroundCheckLlzController::class, 'index']);
             Route::post('/', [GroundCheckLlzController::class, 'store'])
-                ->middleware('role:Admin,Manager Teknik,Supervisor CNSD,Teknisi CNSD');
+                ->middleware('role:Admin,Manager Teknik,Supervisor CNSD,Supervisor TFP,Teknisi CNSD');
             Route::get('/{id}',     [GroundCheckLlzController::class, 'show'])->whereNumber('id');
             Route::put('/{id}',     [GroundCheckLlzController::class, 'update'])->whereNumber('id');
             Route::post('/{id}/sign', [GroundCheckLlzController::class, 'sign'])->whereNumber('id');
@@ -590,7 +688,7 @@ Route::prefix('v1')->group(function () {
             Route::delete('/{id}/photos/{photoId}', [GroundCheckLlzController::class, 'deletePhoto'])->whereNumber('id')->whereNumber('photoId');
             Route::delete('/{id}', [GroundCheckLlzController::class, 'destroy'])
                 ->whereNumber('id')
-                ->middleware('role:Admin,Manager Teknik');
+                ->middleware('role:Admin,Manager Teknik,Supervisor CNSD,Supervisor TFP');
         });
 
         // ─── Ground Check GP (ILS Glide Path) ───────────────────────
@@ -599,7 +697,7 @@ Route::prefix('v1')->group(function () {
             Route::get('/years',    [GroundCheckGpController::class, 'years']);
             Route::get('/',         [GroundCheckGpController::class, 'index']);
             Route::post('/', [GroundCheckGpController::class, 'store'])
-                ->middleware('role:Admin,Manager Teknik,Supervisor CNSD,Teknisi CNSD');
+                ->middleware('role:Admin,Manager Teknik,Supervisor CNSD,Supervisor TFP,Teknisi CNSD');
             Route::get('/{id}',     [GroundCheckGpController::class, 'show'])->whereNumber('id');
             Route::put('/{id}',     [GroundCheckGpController::class, 'update'])->whereNumber('id');
             Route::post('/{id}/sign', [GroundCheckGpController::class, 'sign'])->whereNumber('id');
@@ -609,7 +707,7 @@ Route::prefix('v1')->group(function () {
             Route::delete('/{id}/photos/{photoId}', [GroundCheckGpController::class, 'deletePhoto'])->whereNumber('id')->whereNumber('photoId');
             Route::delete('/{id}', [GroundCheckGpController::class, 'destroy'])
                 ->whereNumber('id')
-                ->middleware('role:Admin,Manager Teknik');
+                ->middleware('role:Admin,Manager Teknik,Supervisor CNSD,Supervisor TFP');
         });
 
         // ─── Ground Check DVOR (Doppler VHF Omnidirectional Range) ──
@@ -618,7 +716,7 @@ Route::prefix('v1')->group(function () {
             Route::get('/years',    [GroundCheckDvorController::class, 'years']);
             Route::get('/',         [GroundCheckDvorController::class, 'index']);
             Route::post('/', [GroundCheckDvorController::class, 'store'])
-                ->middleware('role:Admin,Manager Teknik,Supervisor CNSD,Teknisi CNSD');
+                ->middleware('role:Admin,Manager Teknik,Supervisor CNSD,Supervisor TFP,Teknisi CNSD');
             Route::get('/{id}',     [GroundCheckDvorController::class, 'show'])->whereNumber('id');
             Route::put('/{id}',     [GroundCheckDvorController::class, 'update'])->whereNumber('id');
             Route::post('/{id}/sign', [GroundCheckDvorController::class, 'sign'])->whereNumber('id');
@@ -628,7 +726,7 @@ Route::prefix('v1')->group(function () {
             Route::delete('/{id}/photos/{photoId}', [GroundCheckDvorController::class, 'deletePhoto'])->whereNumber('id')->whereNumber('photoId');
             Route::delete('/{id}', [GroundCheckDvorController::class, 'destroy'])
                 ->whereNumber('id')
-                ->middleware('role:Admin,Manager Teknik');
+                ->middleware('role:Admin,Manager Teknik,Supervisor CNSD,Supervisor TFP');
         });
 
         // ─── Reporting / Laporan Kerusakan ─────────────────────────
@@ -650,55 +748,91 @@ Route::prefix('v1')->group(function () {
             Route::post('/{id}/sign', [ReportingDamageReportController::class, 'sign'])->whereNumber('id');
             Route::delete('/{id}', [ReportingDamageReportController::class, 'destroy'])
                 ->whereNumber('id')
-                ->middleware('role:Admin,Manager Teknik');
+                ->middleware('role:Admin,Manager Teknik,Supervisor CNSD,Supervisor TFP');
         });
 
         // ─── Logbook TFP ───────────────────────────────────────────
+        // Write endpoints are gated per-row so opposite-division technicians
+        // (Teknisi CNSD here) can only READ TFP logbook, never modify it.
+        // Equipment management + signing further excludes teknisi entirely.
         Route::prefix('logbook/tfp')->group(function () {
+            // Read endpoints — open to any authenticated user
             Route::get('/years',      [LogbookTfpController::class, 'years']);
             Route::get('/equipments', [LogbookTfpController::class, 'equipments']);
             Route::get('/',           [LogbookTfpController::class, 'index']);
-            Route::post('/', [LogbookTfpController::class, 'store'])
-                ->middleware('role:Admin,Manager Teknik,Supervisor TFP,Teknisi TFP');
             Route::get('/{id}',       [LogbookTfpController::class, 'show'])->whereNumber('id');
-            Route::put('/{id}/items', [LogbookTfpController::class, 'updateItems'])->whereNumber('id');
-            Route::post('/{id}/bulk-status', [LogbookTfpController::class, 'bulkStatus'])->whereNumber('id');
-            Route::post('/{id}/notes', [LogbookTfpController::class, 'addNote'])->whereNumber('id');
-            Route::delete('/{id}/notes/{noteId}', [LogbookTfpController::class, 'deleteNote'])->whereNumber('id')->whereNumber('noteId');
-            Route::post('/{id}/equipments', [LogbookTfpController::class, 'addEquipment'])->whereNumber('id');
-            Route::put('/{id}/equipments/{itemId}', [LogbookTfpController::class, 'editEquipment'])->whereNumber('id')->whereNumber('itemId');
-            Route::delete('/{id}/equipments/{itemId}', [LogbookTfpController::class, 'removeEquipment'])->whereNumber('id')->whereNumber('itemId');
-            Route::post('/{id}/sign', [LogbookTfpController::class, 'sign'])->whereNumber('id');
+
+            // Create logbook + fill notes/status — Teknisi TFP allowed
+            $tfpFillRoles = 'role:Admin,Manager Teknik,Supervisor CNSD,Supervisor TFP,Teknisi TFP';
+            Route::post('/', [LogbookTfpController::class, 'store'])
+                ->middleware($tfpFillRoles);
+            Route::put('/{id}/items', [LogbookTfpController::class, 'updateItems'])
+                ->whereNumber('id')->middleware($tfpFillRoles);
+            Route::post('/{id}/bulk-status', [LogbookTfpController::class, 'bulkStatus'])
+                ->whereNumber('id')->middleware($tfpFillRoles);
+            Route::post('/{id}/notes', [LogbookTfpController::class, 'addNote'])
+                ->whereNumber('id')->middleware($tfpFillRoles);
+            Route::delete('/{id}/notes/{noteId}', [LogbookTfpController::class, 'deleteNote'])
+                ->whereNumber('id')->whereNumber('noteId')->middleware($tfpFillRoles);
+
+            // Equipment management + sign — Teknisi excluded
+            $tfpManageRoles = 'role:Admin,Manager Teknik,Supervisor CNSD,Supervisor TFP';
+            Route::post('/{id}/equipments', [LogbookTfpController::class, 'addEquipment'])
+                ->whereNumber('id')->middleware($tfpManageRoles);
+            Route::put('/{id}/equipments/{itemId}', [LogbookTfpController::class, 'editEquipment'])
+                ->whereNumber('id')->whereNumber('itemId')->middleware($tfpManageRoles);
+            Route::delete('/{id}/equipments/{itemId}', [LogbookTfpController::class, 'removeEquipment'])
+                ->whereNumber('id')->whereNumber('itemId')->middleware($tfpManageRoles);
+            Route::post('/{id}/sign', [LogbookTfpController::class, 'sign'])
+                ->whereNumber('id')->middleware($tfpManageRoles);
             Route::delete('/{id}', [LogbookTfpController::class, 'destroy'])
-                ->whereNumber('id')
-                ->middleware('role:Admin,Manager Teknik');
+                ->whereNumber('id')->middleware($tfpManageRoles);
         });
 
         // ─── Logbook CNSD ──────────────────────────────────────────
+        // Mirror of Logbook TFP — Teknisi CNSD can fill notes/status but not
+        // manage equipment, Teknisi TFP is fully blocked from writes here.
         Route::prefix('logbook/cnsd')->group(function () {
             Route::get('/years',      [LogbookCnsdController::class, 'years']);
             Route::get('/equipments', [LogbookCnsdController::class, 'equipments']);
             Route::get('/',           [LogbookCnsdController::class, 'index']);
-            Route::post('/', [LogbookCnsdController::class, 'store'])
-                ->middleware('role:Admin,Manager Teknik,Supervisor CNSD,Teknisi CNSD');
             Route::get('/{id}',       [LogbookCnsdController::class, 'show'])->whereNumber('id');
-            Route::put('/{id}/items', [LogbookCnsdController::class, 'updateItems'])->whereNumber('id');
-            Route::post('/{id}/bulk-status', [LogbookCnsdController::class, 'bulkStatus'])->whereNumber('id');
-            Route::post('/{id}/notes', [LogbookCnsdController::class, 'addNote'])->whereNumber('id');
-            Route::delete('/{id}/notes/{noteId}', [LogbookCnsdController::class, 'deleteNote'])->whereNumber('id')->whereNumber('noteId');
-            Route::post('/{id}/equipments', [LogbookCnsdController::class, 'addEquipment'])->whereNumber('id');
-            Route::put('/{id}/equipments/{itemId}', [LogbookCnsdController::class, 'editEquipment'])->whereNumber('id')->whereNumber('itemId');
-            Route::delete('/{id}/equipments/{itemId}', [LogbookCnsdController::class, 'removeEquipment'])->whereNumber('id')->whereNumber('itemId');
-            Route::post('/{id}/sign', [LogbookCnsdController::class, 'sign'])->whereNumber('id');
+
+            $cnsdFillRoles = 'role:Admin,Manager Teknik,Supervisor CNSD,Supervisor TFP,Teknisi CNSD';
+            Route::post('/', [LogbookCnsdController::class, 'store'])
+                ->middleware($cnsdFillRoles);
+            Route::put('/{id}/items', [LogbookCnsdController::class, 'updateItems'])
+                ->whereNumber('id')->middleware($cnsdFillRoles);
+            Route::post('/{id}/bulk-status', [LogbookCnsdController::class, 'bulkStatus'])
+                ->whereNumber('id')->middleware($cnsdFillRoles);
+            Route::post('/{id}/notes', [LogbookCnsdController::class, 'addNote'])
+                ->whereNumber('id')->middleware($cnsdFillRoles);
+            Route::delete('/{id}/notes/{noteId}', [LogbookCnsdController::class, 'deleteNote'])
+                ->whereNumber('id')->whereNumber('noteId')->middleware($cnsdFillRoles);
+
+            $cnsdManageRoles = 'role:Admin,Manager Teknik,Supervisor CNSD,Supervisor TFP';
+            Route::post('/{id}/equipments', [LogbookCnsdController::class, 'addEquipment'])
+                ->whereNumber('id')->middleware($cnsdManageRoles);
+            Route::put('/{id}/equipments/{itemId}', [LogbookCnsdController::class, 'editEquipment'])
+                ->whereNumber('id')->whereNumber('itemId')->middleware($cnsdManageRoles);
+            Route::delete('/{id}/equipments/{itemId}', [LogbookCnsdController::class, 'removeEquipment'])
+                ->whereNumber('id')->whereNumber('itemId')->middleware($cnsdManageRoles);
+            Route::post('/{id}/sign', [LogbookCnsdController::class, 'sign'])
+                ->whereNumber('id')->middleware($cnsdManageRoles);
             Route::delete('/{id}', [LogbookCnsdController::class, 'destroy'])
-                ->whereNumber('id')
-                ->middleware('role:Admin,Manager Teknik');
+                ->whereNumber('id')->middleware($cnsdManageRoles);
         });
 
         // ─── Personnel ─────────────────────────────────────────
         Route::get('/personnel', [PersonnelController::class, 'index']);
         // Real shift context from atoms-rostering (read-only DB query)
         Route::get('/personnel/shift-today', [PersonnelController::class, 'shiftToday']);
+
+        // ─── Monitor settings (authenticated) ──────────────────
+        // Rotate the kiosk gate password. Manager Teknik / Supervisor / Admin only —
+        // the controller validates the old password before persisting the new one.
+        Route::put('/monitor/password', [\App\Http\Controllers\Api\V1\MonitorController::class, 'updatePassword'])
+            ->middleware('role:Admin,Manager Teknik,Supervisor CNSD,Supervisor TFP');
 
         // ─── Notifications ─────────────────────────────────────
         Route::get('/notifications', [NotificationController::class, 'index']);
